@@ -254,7 +254,17 @@ fn self_test()->Result<(),String> {
 }
 
 fn main() {
-    if let Err(e)=run() {show_error(&e);std::process::exit(1)}
+    #[cfg(windows)]
+    std::panic::set_hook(Box::new(|info| {
+        let message=format!("PRIMORDIA a rencontré une erreur interne :\\n\\n{info}\\n\\nDétails enregistrés dans le dossier temporaire.");
+        let _=std::fs::write(std::env::temp_dir().join("primordia-startup-error.txt"), &message);
+        show_error(&message);
+    }));
+    if let Err(e)=run() {
+        let _=std::fs::write(std::env::temp_dir().join("primordia-startup-error.txt"), &e);
+        show_error(&e);
+        std::process::exit(1)
+    }
 }
 fn run()->Result<(),String> {
     let args:Vec<String>=std::env::args().collect();
