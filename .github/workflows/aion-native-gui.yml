@@ -1,0 +1,45 @@
+name: AION Native Windows GUI
+on:
+  push:
+    paths:
+      - 'Cargo.toml'
+      - 'crates/aion-rust-sim/**'
+      - 'crates/aion-window/**'
+      - '.github/workflows/aion-native-gui.yml'
+  pull_request:
+    paths:
+      - 'Cargo.toml'
+      - 'crates/aion-rust-sim/**'
+      - 'crates/aion-window/**'
+      - '.github/workflows/aion-native-gui.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-gui:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Rust GUI compilation
+        run: cargo build --release -p aion-window
+      - name: Rust GUI unit tests
+        run: cargo test -p aion-window
+      - name: Core physics self-test
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "$PWD\target\release\aion-window.exe" -ArgumentList "--self-test" -Wait -PassThru
+          $code = $p.ExitCode
+          Get-Content "$env:TEMP\aion-gui-self-test.txt"
+          if ($code -ne 0) { throw 'Rust solver test failed' }
+      - name: Native Win32 window and draw smoke test
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "$PWD\target\release\aion-window.exe" -ArgumentList "--window-smoke" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw 'Windows GUI window creation or draw failed' }
+      - name: Upload verified graphical .exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: AION-CORE-WIN64-GRAPHICAL
+          path: target/release/aion-window.exe
+          if-no-files-found: error

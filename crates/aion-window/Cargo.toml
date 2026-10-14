@@ -1,0 +1,8 @@
+[package]
+name = "aion-window"
+version = "0.10.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+aion-rust-sim = { path = "../aion-rust-sim" }
