@@ -4,23 +4,36 @@
 mod windows_gui;
 
 #[cfg(windows)]
+fn diagnostics() -> i32 {
+    let mut report = String::from("AION native Rust GUI self-test\n");
+    let mut sim = aion_rust_sim::AionSim::laboratory(0);
+    let mass = sim.mass();
+    report.push_str(&format!("Initial: {} nodes, {} bonds, mass={mass}\n",sim.node_count,sim.edge_count));
+    for _ in 0..120 { sim.step(1.0 / 120.0); }
+    report.push_str(&format!("Time: {}, mass={}, temperature={}, energy={}\n",sim.sim_time,sim.mass(),sim.nodes[0].t,sim.total_energy()));
+    let code = if (sim.mass()-mass).abs()>1e-7 { 11 }
+        else if !(sim.sim_time>0.0 && sim.node_count>0){12}
+        else if let Some(data) = sim.encode_v7() {
+            if let Some(copy) = aion_rust_sim::AionSim::decode_v7(&data) {
+                if sim.checksum()!=copy.checksum(){14}else{0}
+            }else{13}
+        }else{15};
+    report.push_str(&format!("EXIT CODE: {code}\n"));
+    let path=std::env::temp_dir().join("aion-gui-self-test.txt");
+    let _=std::fs::write(&path, report);
+    code
+}
+
+#[cfg(windows)]
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|s| s == "--self-test") {
-        let mut s = aion_rust_sim::AionSim::laboratory(0);
-        let mass = s.mass();
-        for _ in 0..120 { s.step(1.0 / 120.0); }
-        assert!((s.mass() - mass).abs() < 1e-7, "mass conservation failed");
-        assert!(s.sim_time > 0.0 && s.node_count > 0);
-        let data = s.encode_v7().expect("serialize physical state");
-        let loaded = aion_rust_sim::AionSim::decode_v7(&data).expect("deserialize physical state");
-        assert_eq!(s.checksum(), loaded.checksum(), "AION7 roundtrip failed");
-        std::process::exit(0);
+        std::process::exit(diagnostics());
     }
     windows_gui::run(args.iter().any(|s| s == "--window-smoke"));
 }
 
 #[cfg(not(windows))]
 fn main() {
-    eprintln!("AION CORE Visualizer: the graphical executable targets Windows x64. Use the core simulation on Linux.");
+    eprintln!("AION CORE Visualizer: graphical executable targets Windows x64.");
 }
