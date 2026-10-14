@@ -23,8 +23,9 @@ Ces critères constituent un programme de recherche et développement ouvert, sa
 
 ## État technique
 
-- AION 0.10 : moteur Rust mécanique simplifié et visualiseur Win32/GDI. Pas de monde librement explorable ni de rendu GPU.
-- Chantier actif : données de terrain procédural continu, chunks, métadonnées climatiques/biomes ; puis rendu GPU, caméra FPS, streaming et collisions.
+- AION 0.10 : noyau mécanique Rust et visualiseur diagnostic Win32/GDI, préservés pour les expériences de référence.
+- AION 0.11 : premier explorateur GPU natif Rust (`aion-explore`, wgpu), terrain déterministe, chunks continus chargés autour du joueur, caméra FPS avec suivi de hauteur, vol libre, éclairage/brouillard et végétation purement visuelle. Tests Windows/Linux et création de fenêtre Windows en CI réussis ; fonctionnement GPU sur PC utilisateur encore non testé.
+- Chantier actif : vérifier l'exécution graphique sur GPU réel, introduire une navigation robuste et des collisions physiques, connecter le solveur de matériaux à des éléments manipulables du paysage, rendre le monde persistant et mesurable ; puis écologie et agents incarnés.
 - Physique de particules simplifiée ; ne pas la présenter comme simulation atomique.
 
 **NE JAMAIS MARQUER LE GOAL TERMINÉ SUR UN SEUL JALON.**
