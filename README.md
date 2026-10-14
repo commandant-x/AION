@@ -1,3 +1,14 @@
+# PRIMORDIA 0.14 — Excavation volumique et premières cavités 3D
+
+La version 0.14 contient un système de cellules volumétriques éparses de **2 × 2 × 2 m**, indépendantes des couches de surface. B permet de creuser **8 m³** de sol ou roche devant le joueur ; N permet de déposer un bloc de la matière sélectionnée dans l'espace libre adjacent. Les faces de cavité sont désormais rendues dans le maillage GPU et les blocs de surface retirés ouvrent le terrain.
+
+Les systèmes Q/E de la version 0.13 (surface, 2 m³) fonctionnent toujours et **possèdent temporairement un stock distinct** de l'inventaire volumique B/N. Les touches 1–8 sélectionnent la matière ; P/L sauvegardent et rechargent les deux fichiers `.aion13` et `.aionv14`.
+
+**Limite structurante :** le déplacement du personnage ne tient toujours pas compte des caves, le contrôleur suit la surface d'altitude. Les cavités sont réellement représentées en 3D dans la structure et le rendu, mais il n'est pas encore possible de les parcourir à pied. Ni résistance de toiture, ni fluides, ni tectonique calculée. La fenêtre Win32 a été testée en CI ; l'affichage GPU interactif sur le PC utilisateur reste à confirmer.
+
+**Validation** : [tests Windows et Linux AION 0.14](https://github.com/commandant-x/AION/actions/runs/38600186620) — noyau voxels, mesh, tests, exécutable release et démarrage fenêtre.
+
+---
 # PRIMORDIA 0.13 — Première interaction avec la croûte terrestre
 
 Le moteur Rust GPU permet maintenant de **creuser et remblayer le relief**. Il distingue huit types de matières (terre, sable, argile, gravier, tourbe, calcaire, granite et basalte), avec des strates liées aux champs géologiques, des densités et des duretés synthétiques. Les changements restent visibles lors du streaming du terrain. Un inventaire comptabilise les matériaux extraits et empêche la création de matière lors du dépôt.
