@@ -7,13 +7,14 @@ on:
       - 'crates/aion-explore/**'
       - '.github/workflows/aion-gpu-explorer.yml'
       - 'tests/validate_hydro_015.py'
-      - 'tests/validate_hydro_015.py'
+      - 'tests/validate_coupling_016.py'
   pull_request:
     paths:
       - 'Cargo.toml'
       - 'crates/aion-world/**'
       - 'crates/aion-explore/**'
       - '.github/workflows/aion-gpu-explorer.yml'
+      - 'tests/validate_coupling_016.py'
   workflow_dispatch:
 permissions:
   contents: read
@@ -54,6 +55,15 @@ jobs:
             ./target/release/aion-explore --hydro-benchmark hydro-015.csv
           fi
           python tests/validate_hydro_015.py hydro-015.csv
+      - name: Excavation and hydrothermal coupling benchmark (61 observations)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then
+            ./target/release/aion-explore.exe --hydro-coupling hydro-coupling-016.csv
+          else
+            ./target/release/aion-explore --hydro-coupling hydro-coupling-016.csv
+          fi
+          python tests/validate_coupling_016.py hydro-coupling-016.csv
       - name: Native Win32 window smoke test
         if: runner.os == 'Windows'
         shell: pwsh
@@ -68,6 +78,9 @@ jobs:
           path: |
             target/release/aion-explore.exe
             hydro-015.csv
+            hydro-coupling-016.csv
+            crates/aion-explore/MODEL_016.md
+            tests/validate_coupling_016.py
             crates/aion-world/src/hydrothermal.rs
             crates/aion-explore/MODEL_015.md
             tests/validate_hydro_015.py
