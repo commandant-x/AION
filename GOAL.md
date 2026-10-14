@@ -1,15 +1,24 @@
-# AION PRIMORDIA CORE — objectif prioritaire
+# AION / PRIMORDIA CORE — prochaine mission
 
-Faire fonctionner un solveur mécanique Rust natif et produire un exécutable Windows issu du code Rust, avec une suite de tests reproductibles.
+## Jalon validé : exécution Rust native
 
-## Conditions de validation
+La première chaîne native Rust a été validée par GitHub Actions le 14 octobre 2026.
 
-- Importer intégralement les sources AION CORE 0.9 sans perdre les fichiers de test.
-- Compiler avec `cargo test --workspace --all-targets` sur Windows et Linux.
-- Construire en mode release `cargo build --release -p aion-rust-sim --bin aion-rust-headless`.
-- Exécuter réellement sous Windows le binaire obtenu et ses autotests.
-- Comparer les 99 mesures des neuf expériences aux références C avec tolérances explicites.
-- Lire et réécrire les sauvegardes AION7 ; vérifier le rejeu déterministe.
-- Publier l'exécutable Windows `.exe`, ses sources, et son rapport de tests uniquement après réussite de la CI.
+- Linux : tests du workspace complet, puis construction et vérification de la CLI Rust.
+- Windows : tests des modules purement Rust, construction de la CLI Windows x64, exécution des autotests, sauvegarde/rejeu AION7 et comparaison de 99 mesures avec le modèle C.
+- Workflow validé : https://github.com/commandant-x/AION/actions/runs/38558593186
+- La compilation historique C/MSVC reste un problème distinct : elle n'entre pas dans le binaire `aion-rust-headless.exe`.
 
-**État actuel :** dépôt GitHub identifié. L'import intégral des sources et la première compilation CI restent à effectuer. Aucun `.exe` Rust n'a encore été validé.
+Le programme natif Rust est **une application en ligne de commande** et non un moteur graphique 3D.
+
+## Objectif suivant : moteur visuel 100 % Rust
+
+1. Coupler directement le solveur `aion-rust-sim` à une interface graphique Windows écrite en Rust.
+2. Introduire un rendu 3D GPU de laboratoire, avec caméra libre et télémétrie.
+3. Conserver le banc d'expériences reproductibles et la compatibilité AION7.
+4. Tester l'application Windows sur runner CI, y compris démarrage non interactif, puis sur un poste physique.
+5. Ne pas confondre moteur de matière mésoscopique et simulation atomique/quantique fidèle.
+
+## Conditions de livraison
+
+Chaque jalon comprend un `.exe` Windows, les sources, les tests et un rapport de validation. Ne jamais déclarer réussi un test qui n'a pas été exécuté.
