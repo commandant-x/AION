@@ -1,3 +1,15 @@
+# PRIMORDIA 0.11 — Premier monde 3D GPU explorable
+
+**NOUVEAU :** `crates/aion-explore` est un explorateur Windows/Linux construit en Rust avec wgpu et winit. Paysages procéduraux, continuité de terrain, streaming de chunks, caméra à la première personne, couleurs de biomes, éclairage et brouillard. La végétation est **visuelle uniquement**.
+
+Lancez `aion-explore.exe` (fichier fourni en artefact par [la CI Windows](https://github.com/commandant-x/AION/actions/workflows/aion-gpu-explorer.yml)). Commandes : WASD marcher, Shift sprinter, clic gauche regarder (capturer la souris), Échap libérer, F voler, Espace/Ctrl monter/descendre en vol, R réinitialiser. `--seed 42` sélectionne la graine. `--self-test` et `--window-smoke` sont les modes de validation.
+
+**Validation réelle :** [Windows et Linux réussis](https://github.com/commandant-x/AION/actions/runs/38573649405) — tests, construction release, autotest et création de fenêtre Windows. L'affichage GPU interactif sur la machine de l'utilisateur n'a pas encore été confirmé.
+
+**Limites importantes :** pas encore d'eau simulée, d'objets physiques manipulables, d'écologie vivante ou d'agents apprenants. Le Goal PRIMORDIA reste ouvert et ne sera clôturé qu'une fois ses critères complets satisfaits.
+
+---
+
 # AION CORE 0.10 — Fenêtre Windows native en Rust
 
 **Nouvelle application graphique :** `aion-window.exe` (`cargo build --release -p aion-window`). Elle affiche une projection 3D interactive du solveur mécanique Rust : particules, liaisons, fractures, caméra orbitale, impact, traction, chaleur, pause et sauvegarde AION7. Il ne s'agit pas encore d'un moteur graphique GPU.
