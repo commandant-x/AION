@@ -1,24 +1,30 @@
-# AION / PRIMORDIA CORE — prochaine mission
+# AION / PRIMORDIA — GOAL FINAL ET PERMANENT
 
-## Jalon validé : exécution Rust native
+**Règle** : le Goal reste ouvert jusqu'à la réalisation et la validation de TOUS les objectifs ci-dessous. Aucun jalon intermédiaire, version, démonstration ou passage au vert de la CI n'est une condition de clôture.
 
-La première chaîne native Rust a été validée par GitHub Actions le 14 octobre 2026.
+## Définition de terminé (tous les critères requis)
 
-- Linux : tests du workspace complet, puis construction et vérification de la CLI Rust.
-- Windows : tests des modules purement Rust, construction de la CLI Windows x64, exécution des autotests, sauvegarde/rejeu AION7 et comparaison de 99 mesures avec le modèle C.
-- Workflow validé : https://github.com/commandant-x/AION/actions/runs/38558593186
-- La compilation historique C/MSVC reste un problème distinct : elle n'entre pas dans le binaire `aion-rust-headless.exe`.
+- [ ] Monde 3D GPU natif Windows réellement explorable à la première personne : vastes paysages, streaming, collisions, interactions physiques et sauvegardes persistantes.
+- [ ] Modèles multirésolution de matériaux, déformations, fractures, température, transferts d'énergie et conservations quantitatives vérifiées.
+- [ ] Géologie, eau, climat, sols, ressources et écologie évolutive cohérents, avec limites de modèle explicites.
+- [ ] Organismes incarnés : sens, déplacement, nourriture, eau, repos, physiologie, croissance, reproduction, mortalité et écologie.
+- [ ] Agents partant sans connaissances culturelles, expérimentant et apprenant à survivre par interactions causales avec le monde.
+- [ ] Transformations non-scriptées d'objets géométriques et inventions sans arbre technologique ni recettes pré-écrites.
+- [ ] Communication émergente, transmission culturelle, coopération, désaccords et sociétés évolutives.
+- [ ] Simulations durables, sauvegardes/reprises, tests robustes sur le matériel cible et expérience exploitable par l'utilisateur.
 
-Le programme natif Rust est **une application en ligne de commande** et non un moteur graphique 3D.
+Ces critères constituent un programme de recherche et développement ouvert, sans garantie de simulation atomique/quantique intégrale ni de comportements intelligents humains.
 
-## Objectif suivant : moteur visuel 100 % Rust
+## Règles de travail
 
-1. Coupler directement le solveur `aion-rust-sim` à une interface graphique Windows écrite en Rust.
-2. Introduire un rendu 3D GPU de laboratoire, avec caméra libre et télémétrie.
-3. Conserver le banc d'expériences reproductibles et la compatibilité AION7.
-4. Tester l'application Windows sur runner CI, y compris démarrage non interactif, puis sur un poste physique.
-5. Ne pas confondre moteur de matière mésoscopique et simulation atomique/quantique fidèle.
+À chaque jalon VALIDÉ, informer l'utilisateur des fonctions effectives, des changements de code, des validations Windows/Linux, des limites et du prochain chantier. Le travail continue ensuite.
 
-## Conditions de livraison
+À chaque VERSION livrée, fournir un véritable exécutable Windows .exe, les sources complètes, les tests et un rapport honnête. Un module interne non livré ne constitue pas une nouvelle version.
 
-Chaque jalon comprend un `.exe` Windows, les sources, les tests et un rapport de validation. Ne jamais déclarer réussi un test qui n'a pas été exécuté.
+## État technique
+
+- AION 0.10 : moteur Rust mécanique simplifié et visualiseur Win32/GDI. Pas de monde librement explorable ni de rendu GPU.
+- Chantier actif : données de terrain procédural continu, chunks, métadonnées climatiques/biomes ; puis rendu GPU, caméra FPS, streaming et collisions.
+- Physique de particules simplifiée ; ne pas la présenter comme simulation atomique.
+
+**NE JAMAIS MARQUER LE GOAL TERMINÉ SUR UN SEUL JALON.**
