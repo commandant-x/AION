@@ -105,7 +105,7 @@ impl Explorer {
             })]}),
             primitive:wgpu::PrimitiveState{
                 topology:wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format:None,front_face:wgpu::FrontFace::Ccw,cull_mode:Some(wgpu::Face::Back),
+                strip_index_format:None,front_face:wgpu::FrontFace::Ccw,cull_mode:None,
                 polygon_mode:wgpu::PolygonMode::Fill,unclipped_depth:false,conservative:false,
             },
             depth_stencil:Some(wgpu::DepthStencilState{
@@ -259,6 +259,15 @@ fn main() {
 fn run()->Result<(),String> {
     let args:Vec<String>=std::env::args().collect();
     if args.iter().any(|x|x=="--self-test") {return self_test();}
+    if args.iter().any(|x|x=="--window-smoke") {
+        // Real native window creation, but no GPU adapter required on CI runners.
+        let loop_=EventLoop::new().map_err(|e|e.to_string())?;
+        let window=WindowBuilder::new().with_title("PRIMORDIA Window Smoke Test")
+            .with_inner_size(winit::dpi::LogicalSize::new(640.,480.))
+            .build(&loop_).map_err(|e|format!("Window creation failed: {e}"))?;
+        if window.inner_size().width==0 {return Err("Window has zero size".to_string());}
+        return Ok(());
+    }
     let seed=args.windows(2).find(|pair|pair[0]=="--seed")
         .map(|pair|pair[1].parse::<u64>().map_err(|_|"Usage: --seed <u64>".to_string()))
         .transpose()?.unwrap_or(DEFAULT_SEED);

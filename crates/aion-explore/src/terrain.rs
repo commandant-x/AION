@@ -73,8 +73,66 @@ pub fn build_mesh(c: &Chunk) -> Mesh {
         // Surface winding for +Y facing triangles.
         indices.extend_from_slice(&[a,c,b,b,c,d]);
     }}
+    // These trees are visual landmarks only. Biology/ecology remain future systems.
+    append_procedural_trees(c,&mut vertices,&mut indices);
     Mesh { vertices, indices }
 }
+
+fn tree_hash(wx: i64, wz: i64) -> u64 {
+    let mut h=(wx as u64).wrapping_mul(0x9e3779b97f4a7c15) ^
+        (wz as u64).wrapping_mul(0xd1b54a32d192ed03);
+    h ^= h >> 30;
+    h = h.wrapping_mul(0xbf58476d1ce4e5b9);
+    h ^= h >> 27;
+    h = h.wrapping_mul(0x94d049bb133111eb);
+    h ^ (h >> 31)
+}
+fn add_face(v:&mut Vec<Vertex>,i:&mut Vec<u32>,a:[f32;3],b:[f32;3],c:[f32;3],color:[f32;3]) {
+    let ab=[b[0]-a[0],b[1]-a[1],b[2]-a[2]];
+    let ac=[c[0]-a[0],c[1]-a[1],c[2]-a[2]];
+    let n=[ab[1]*ac[2]-ab[2]*ac[1],ab[2]*ac[0]-ab[0]*ac[2],ab[0]*ac[1]-ab[1]*ac[0]];
+    let len=(n[0]*n[0]+n[1]*n[1]+n[2]*n[2]).sqrt().max(1.0e-5);
+    let normal=[n[0]/len,n[1]/len,n[2]/len];
+    let base=v.len() as u32;
+    for position in [a,b,c]{v.push(Vertex{position,normal,color});}
+    i.extend_from_slice(&[base,base+1,base+2]);
+}
+fn append_procedural_trees(c:&Chunk,v:&mut Vec<Vertex>,i:&mut Vec<u32>) {
+    for iz in (2..CHUNK_QUADS).step_by(3) {for ix in (2..CHUNK_QUADS).step_by(3) {
+        let id=Chunk::index(ix,iz);
+        let biome=c.biomes[id];
+        let gx=c.x as i64*CHUNK_QUADS as i64+ix as i64;
+        let gz=c.z as i64*CHUNK_QUADS as i64+iz as i64;
+        let h=tree_hash(gx,gz);
+        let density=match biome {
+            Biome::Forest=>68,
+            Biome::Boreal=>52,
+            Biome::Grassland=>5,
+            Biome::Wetland=>17,
+            _=>0,
+        };
+        if h % 100 >= density {continue;}
+        let x=(c.x as f64*CHUNK_METRES + ix as f64*CELL_METRES) as f32;
+        let z=(c.z as f64*CHUNK_METRES + iz as f64*CELL_METRES) as f32;
+        let base=c.heights[id];
+        let height=9.0+((h>>8)%9) as f32;
+        let crown=height*0.85;
+        let radius=1.7+((h>>16)%100) as f32*0.017;
+        let bark=[0.32,0.24,0.16];
+        let leaf=if biome==Biome::Boreal{[0.12,0.27,0.22]}else{[0.11,0.33,0.16]};
+        // A tapered trunk and two conifer silhouettes; not collision geometry.
+        let y=base;
+        let a=[x-0.25,y,z];let b=[x+0.25,y,z];
+        let c0=[x+0.25,y+height*0.58,z];let d=[x-0.25,y+height*0.58,z];
+        add_face(v,i,a,b,c0,bark);add_face(v,i,a,c0,d,bark);
+        for (cy,rr,hh) in [(y+height*0.27,radius,crown*0.68),(y+height*0.52,radius*0.75,crown*0.56)]{
+            let apex=[x,cy+hh,z];
+            let ring=[[x-rr,cy,z-rr],[x+rr,cy,z-rr],[x+rr,cy,z+rr],[x-rr,cy,z+rr]];
+            for k in 0..4 {add_face(v,i,ring[k],ring[(k+1)%4],apex,leaf);}
+        }
+    }}
+}
+
 
 pub fn chunk_key(x:f64,z:f64)->(i32,i32) {
     ((x/CHUNK_METRES).floor() as i32,(z/CHUNK_METRES).floor() as i32)
@@ -106,10 +164,10 @@ pub fn ordered_neighbours(cx:i32,cz:i32,radius:i32)->Vec<(i32,i32)> {
     }
     #[test] fn mesh_indices_in_range_and_facing_up() {
         let m=build_mesh(&World::new(1234).chunk(-1,0));
-        assert_eq!(m.vertices.len(),(CHUNK_QUADS+1).pow(2));
-        assert_eq!(m.indices.len(),6*CHUNK_QUADS.pow(2));
+        assert!(m.vertices.len()>=(CHUNK_QUADS+1).pow(2));
+        assert!(m.indices.len()>=6*CHUNK_QUADS.pow(2));
         assert!(m.indices.iter().all(|&i| i < m.vertices.len() as u32));
-        for tri in m.indices.chunks_exact(3) {
+        for tri in m.indices[..6*CHUNK_QUADS.pow(2)].chunks_exact(3) {
             let a=m.vertices[tri[0] as usize].position;
             let b=m.vertices[tri[1] as usize].position;
             let c=m.vertices[tri[2] as usize].position;
@@ -128,6 +186,14 @@ pub fn ordered_neighbours(cx:i32,cz:i32,radius:i32)->Vec<(i32,i32)> {
             assert_eq!(va.position[1].to_bits(),vb.position[1].to_bits());
             assert_eq!(va.normal,vb.normal);
         }
+    }
+    #[test] fn decorative_geometry_is_deterministic_and_finite() {
+        let w=World::new(101);
+        let a=build_mesh(&w.chunk(2,3));
+        let b=build_mesh(&w.chunk(2,3));
+        assert_eq!(a.indices,b.indices);
+        assert_eq!(bytemuck::cast_slice::<Vertex,u8>(&a.vertices),bytemuck::cast_slice::<Vertex,u8>(&b.vertices));
+        assert!(a.vertices.iter().flat_map(|v|v.position).all(|p|p.is_finite()));
     }
     #[test] fn streaming_prioritises_nearest_and_unique_chunks() {
         let v=ordered_neighbours(-2,7,3);

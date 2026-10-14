@@ -40,6 +40,12 @@ jobs:
           else
             ./target/release/aion-explore --self-test
           fi
+      - name: Native Win32 window smoke test
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $proc = Start-Process -FilePath "$PWD/target/release/aion-explore.exe" -ArgumentList '--window-smoke' -PassThru -Wait
+          if ($proc.ExitCode -ne 0) { throw "Win32 window smoke failed with code $($proc.ExitCode)" }
       - name: Publish Windows application and sources
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
