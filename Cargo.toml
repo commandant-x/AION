@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/aion-core", "crates/aion-lab", "crates/aion-native", "crates/aion-rust-sim", "crates/aion-window", "crates/aion-world"]
+members = ["crates/aion-core", "crates/aion-lab", "crates/aion-native", "crates/aion-rust-sim", "crates/aion-window", "crates/aion-world", "crates/aion-explore"]
 resolver = "2"
 
 [workspace.package]
