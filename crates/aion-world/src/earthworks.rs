@@ -164,7 +164,7 @@ use super::*;
  for &(x,z) in &[(-500.,70.),(16.,-93.),(2052.,411.)] { for d in [0.,1.,4.,12.,39.] {
  assert_eq!(material_at(&a,x,z,d),material_at(&b,x,z,d));
  }}
- let mut kinds=std::collections::BTreeSet::new();for x in -20..20{for z in -20..20{kinds.insert(material_at(&a,x as f64*43.,z as f64*53.,0.));}}
+ let mut kinds=std::collections::BTreeSet::new();for x in -20..20{for z in -20..20{for depth in [0.0,2.0,8.0,20.0] {kinds.insert(material_at(&a,x as f64*443.,z as f64*553.,depth));}}}
  assert!(kinds.len()>=3);assert!(Material::ALL.iter().all(|m|m.density_kg_m3()>0&&m.hardness()>0));
 }
 #[test]fn conserved_excavation_and_deposit(){
