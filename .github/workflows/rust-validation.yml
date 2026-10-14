@@ -23,8 +23,12 @@ jobs:
       - name: Initialize MSVC build tools
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
-      - name: Unit and integration tests
+      - name: Full workspace tests including C reference (Linux)
+        if: runner.os == 'Linux'
         run: cargo test --workspace --all-targets
+      - name: Rust-only physics tests (Windows)
+        if: runner.os == 'Windows'
+        run: cargo test -p aion-core -p aion-lab -p aion-rust-sim --all-targets
       - name: Build native Rust executable
         run: cargo build --release -p aion-rust-sim --bin aion-rust-headless
       - name: Windows executable smoke test
