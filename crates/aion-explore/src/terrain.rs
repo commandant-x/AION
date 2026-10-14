@@ -1,6 +1,6 @@
 //! Deterministic indexed surface mesh for the multiresolution world model.
 //! Geometry (including chunk coordinates) is defined in metres.
-use aion_world::{Biome, Chunk, CELL_METRES, CHUNK_QUADS, CHUNK_METRES};
+use aion_world::{Biome, Chunk, World, CELL_METRES, CHUNK_QUADS, CHUNK_METRES, SEA_LEVEL_M};
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -76,6 +76,85 @@ pub fn build_mesh(c: &Chunk) -> Mesh {
     // These trees are visual landmarks only. Biology/ecology remain future systems.
     append_procedural_trees(c,&mut vertices,&mut indices);
     Mesh { vertices, indices }
+}
+
+/// The local chunk uses 2m/4m samples, distant chunks 8m.
+/// A vertical edge skirt hides cracks where neighbouring LODs disagree.
+pub fn lod_at(dx:i32,dz:i32)->u8 {
+    let radius=dx.abs().max(dz.abs());
+    if radius==0 {0} else if radius<=1 {1} else {2}
+}
+pub fn build_mesh_lod(world:&World,x:i32,z:i32,lod:u8)->Mesh {
+    let quads=CHUNK_QUADS << (2-lod.min(2));
+    let side=quads+1;
+    let step=CHUNK_METRES/quads as f64;
+    let mut heights=Vec::with_capacity(side*side);
+    for iz in 0..side {for ix in 0..side {
+        let wx=x as f64*CHUNK_METRES+ix as f64*step;
+        let wz=z as f64*CHUNK_METRES+iz as f64*step;
+        heights.push(world.elevation_m(wx,wz) as f32);
+    }}
+    let mut vertices=Vec::with_capacity(side*side+4*side);
+    for iz in 0..side {for ix in 0..side {
+        let at=|i:usize,j:usize|heights[j*side+i];
+        let sx=(at((ix+1).min(quads),iz)-at(ix.saturating_sub(1),iz)) /
+            (if ix==0||ix==quads{step as f32}else{(2.0*step) as f32});
+        let sz=(at(ix,(iz+1).min(quads))-at(ix,iz.saturating_sub(1))) /
+            (if iz==0||iz==quads{step as f32}else{(2.0*step) as f32});
+        let inv=(1.0+sx*sx+sz*sz).sqrt().recip();
+        let normal=[-sx*inv,inv,-sz*inv];
+        let wx=x as f64*CHUNK_METRES+ix as f64*step;
+        let wz=z as f64*CHUNK_METRES+iz as f64*step;
+        let h=at(ix,iz);
+        let biome=world.biome_at(wx,wz,h as f64,(sx*sx+sz*sz).sqrt() as f64);
+        vertices.push(Vertex {
+            position:[wx as f32,h,wz as f32],normal,
+            color:shade(biome,h,(1.0/inv.max(0.01)-1.0).max(0.0)),
+        });
+    }}
+    let mut indices=Vec::with_capacity(quads*quads*6+quads*4*6);
+    for iz in 0..quads {for ix in 0..quads {
+        let a=(iz*side+ix) as u32;
+        let b=a+1;let c=a+side as u32;let d=c+1;
+        indices.extend_from_slice(&[a,c,b,b,c,d]);
+    }}
+    append_skirts(&mut vertices,&mut indices,quads);
+    // Decoration is sampled at the stable original 8m grid, regardless of LOD.
+    append_procedural_trees(&world.chunk(x,z),&mut vertices,&mut indices);
+    Mesh{vertices,indices}
+}
+fn append_skirts(v:&mut Vec<Vertex>,i:&mut Vec<u32>,quads:usize) {
+    let side=quads+1;
+    let ring=(0..side).map(|x|x)
+        .chain((1..side).map(|z|z*side+quads))
+        .chain((0..quads).rev().map(|x|quads*side+x))
+        .chain((1..quads).rev().map(|z|z*side));
+    let boundary:Vec<usize>=ring.collect();
+    let mut extruded=Vec::with_capacity(boundary.len());
+    for &id in &boundary {
+        let mut vtx=v[id];vtx.position[1]-=25.0;
+        vtx.color=vtx.color.map(|component|component*0.65);
+        extruded.push(v.len() as u32);
+        v.push(vtx);
+    }
+    for j in 0..boundary.len(){let next=(j+1)%boundary.len();
+        let a=boundary[j] as u32;let b=boundary[next] as u32;
+        let c=extruded[j];let d=extruded[next];
+        i.extend_from_slice(&[a,b,c,b,d,c]);
+    }
+}
+/// Actual horizontal ocean surface at 0m, not seabed painted blue.
+/// The terrain depth buffer hides all water beneath emerged land.
+pub fn water_mesh(x:i32,z:i32)->Mesh {
+    let x0=(x as f64*CHUNK_METRES) as f32;
+    let z0=(z as f64*CHUNK_METRES) as f32;
+    let side=CHUNK_METRES as f32;
+    let mut vertices=Vec::new();
+    for (dx,dz) in [(0.,0.),(side,0.),(0.,side),(side,side)] {
+        vertices.push(Vertex {position:[x0+dx,SEA_LEVEL_M,z0+dz],
+            normal:[0.,1.,0.],color:[0.04,0.24,0.40]});
+    }
+    Mesh {vertices,indices:vec![0,2,1,1,2,3]}
 }
 
 fn tree_hash(wx: i64, wz: i64) -> u64 {
@@ -202,4 +281,30 @@ pub fn ordered_neighbours(cx:i32,cz:i32,radius:i32)->Vec<(i32,i32)> {
         let set=std::collections::HashSet::<_>::from_iter(v.iter().copied());
         assert_eq!(set.len(),v.len());
     }
+    #[test] fn near_geometry_has_sixteen_times_the_surface_faces() {
+        let w=World::new(42);
+        let near=build_mesh_lod(&w,0,0,0);
+        let far=build_mesh_lod(&w,0,0,2);
+        assert!(near.vertices.len()>far.vertices.len()*5);
+        assert!(near.indices.len()>far.indices.len()*5);
+        assert!(near.indices.iter().all(|&idx| (idx as usize)<near.vertices.len()));
+    }
+    #[test] fn mixed_lod_borders_have_identical_heights_at_shared_samples() {
+        let w=World::new(11);
+        let fine=build_mesh_lod(&w,-1,2,0);
+        let coarse=build_mesh_lod(&w,0,2,2);
+        let fine_side=129;
+        let coarse_side=33;
+        for z in 0..=32 {
+            assert_eq!(fine.vertices[(z*4)*fine_side+128].position[1].to_bits(),
+                       coarse.vertices[z*coarse_side].position[1].to_bits());
+        }
+    }
+    #[test] fn ocean_surface_is_a_finite_horizontal_plane() {
+        let m=water_mesh(-2,3);
+        assert_eq!(m.indices.len(),6);
+        assert!(m.vertices.iter().all(|v|v.position[1]==SEA_LEVEL_M));
+        assert!(m.indices.iter().all(|&id|(id as usize)<m.vertices.len()));
+    }
+
 }

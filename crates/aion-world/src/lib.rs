@@ -1,6 +1,7 @@
-//! PRIMORDIA: deterministic terrain and coarse biome fields.
-//! Procedural proxies, NOT a geology, erosion, water or climate simulation.
+//! PRIMORDIA: deterministic terrain, synthetic geologic structure and coarse biomes.
+//! These are geological process-informed proxies, NOT a plate-tectonics or hydrology solver.
 
+pub const SEA_LEVEL_M: f32 = 0.0;
 pub const CHUNK_QUADS: usize = 32;
 pub const CELL_METRES: f64 = 8.0;
 pub const CHUNK_METRES: f64 = CHUNK_QUADS as f64 * CELL_METRES;
@@ -8,6 +9,17 @@ pub const CHUNK_METRES: f64 = CHUNK_QUADS as f64 * CELL_METRES;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Biome { Ocean, Shore, Wetland, Desert, Grassland, Forest, Boreal, Tundra, Alpine }
 
+/// Deterministic geological controls used to shape terrain. No evolution over time yet.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Geology {
+    /// Broad fault-belt uplift proxy, varying over regional distances.
+    pub compression: f64,
+    /// Resistance to mechanical/chemical erosion (0..1 proxy).
+    pub rock_hardness: f64,
+    /// Incised valley depth following coherent meandering drainage corridors.
+    pub valley_incision_m: f64,
+    pub uplift_m: f64,
+}
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Sample {
     pub elevation_m: f64,
@@ -69,14 +81,48 @@ impl World {
         }
         value/weight
     }
+    pub fn geology(&self,x:f64,z:f64)->Geology {
+        // Curved, elongated deformation belts. These do NOT simulate the
+        // velocities, material properties or chronology of real tectonic plates.
+        let offset=self.fbm(x,z,0.00017,0x5A91,3)*900.0;
+        let belt=self.fbm(x+offset,z-offset,0.00043,0x5A92,3).abs();
+        let compression=((0.36-belt)/0.36).clamp(0.0,1.0).powi(2);
+        let rock_hardness=((self.fbm(x,z,0.00095,0x5A93,3)+1.0)*0.5).clamp(0.0,1.0);
+        // Drainage corridors meander spatially; incision attenuates in hard rock.
+        let channel=self.fbm(x+offset,z-offset,0.00076,0x5A94,4)
+            +0.20*self.fbm(x,z,0.0032,0x5A95,2);
+        let channel_mask=((0.095-channel.abs())/0.095).clamp(0.0,1.0).powi(2);
+        let valley_incision_m=channel_mask*(42.0-24.0*rock_hardness);
+        Geology {compression,rock_hardness,valley_incision_m,uplift_m:compression*420.0}
+    }
     pub fn elevation_m(&self,x:f64,z:f64)->f64 {
         assert!(x.is_finite() && z.is_finite());
         let continent=self.fbm(x,z,0.00013,0x4101,5);
         let regional=self.fbm(x,z,0.00085,0x4102,4);
         let ridge=1.0-self.fbm(x,z,0.0005,0x4103,4).abs();
         let micro=self.fbm(x,z,0.008,0x4104,3);
+        let geo=self.geology(x,z);
         let mountains=((continent+0.25)*1.65).clamp(0.0,1.0);
-        continent*1450.0+regional*170.0+mountains*mountains*ridge*530.0+micro*21.0-80.0
+        // Broad crustal basins, then deformed bedrock, then valley incision.
+        let base=continent*1450.0+regional*145.0-95.0;
+        let folds=(mountains*mountains*ridge*400.0) + geo.uplift_m*mountains;
+        let weathering=micro*(10.0+20.0*geo.rock_hardness);
+        let fluvial=geo.valley_incision_m * (1.0-0.4*geo.rock_hardness);
+        base+folds+weathering-fluvial
+    }
+    pub fn biome_at(&self,x:f64,z:f64,h:f64,slope:f64)->Biome {
+        let moisture=((self.fbm(x,z,0.00065,0xB100,5)+1.0)*0.5).clamp(0.0,1.0);
+        let latitude=(z/120_000.0).clamp(-1.0,1.0).abs();
+        let temp=29.0-latitude*54.0-h.max(0.0)*0.0065;
+        if h < SEA_LEVEL_M as f64-4.0 { Biome::Ocean }
+        else if h < SEA_LEVEL_M as f64+3.0 { Biome::Shore }
+        else if slope > 1.15 || (temp < -12.0 && h > 500.0) { Biome::Alpine }
+        else if temp < -8.0 { Biome::Tundra }
+        else if temp < 5.0 { Biome::Boreal }
+        else if moisture > 0.73 && slope < 0.13 { Biome::Wetland }
+        else if moisture < 0.30 { Biome::Desert }
+        else if moisture > 0.51 { Biome::Forest }
+        else { Biome::Grassland }
     }
     pub fn sample(&self,x:f64,z:f64)->Sample {
         let h=self.elevation_m(x,z);
@@ -86,16 +132,8 @@ impl World {
         let dx=(self.elevation_m(x+CELL_METRES,z)-self.elevation_m(x-CELL_METRES,z))/(2.0*CELL_METRES);
         let dz=(self.elevation_m(x,z+CELL_METRES)-self.elevation_m(x,z-CELL_METRES))/(2.0*CELL_METRES);
         let slope=(dx*dx+dz*dz).sqrt();
-        let biome=if h < -4.0 { Biome::Ocean }
-            else if h < 3.0 { Biome::Shore }
-            else if slope > 1.15 || (temp < -12.0 && h > 500.0) { Biome::Alpine }
-            else if temp < -8.0 { Biome::Tundra }
-            else if temp < 5.0 { Biome::Boreal }
-            else if moisture > 0.73 && slope < 0.13 { Biome::Wetland }
-            else if moisture < 0.30 { Biome::Desert }
-            else if moisture > 0.51 { Biome::Forest }
-            else { Biome::Grassland };
-        Sample { elevation_m:h, temperature_c:temp, moisture, slope, biome }
+        let biome=self.biome_at(x,z,h,slope);
+        Sample { elevation_m:h,temperature_c:temp,moisture,slope,biome }
     }
     pub fn chunk(&self,x:i32,z:i32)->Chunk {
         let mut heights=Vec::with_capacity(Chunk::SIDE*Chunk::SIDE);
@@ -171,4 +209,27 @@ fn random(x:i64,z:i64,s:u64)->f64 {
             assert!((0.0..=1.0).contains(&s.moisture) && s.slope>=0.0 && s.temperature_c.is_finite());
         }}
     }
+    #[test] fn geological_controls_are_bounded_repeatable_and_spatially_coherent() {
+        let a=World::new(735);
+        for &(x,z) in &[(-5400.0,2200.0),(0.0,0.0),(430.0,-880.0)] {
+            let g=a.geology(x,z);
+            assert_eq!(g,a.geology(x,z));
+            assert!((0.0..=1.0).contains(&g.compression));
+            assert!((0.0..=1.0).contains(&g.rock_hardness));
+            assert!((0.0..=42.0).contains(&g.valley_incision_m));
+            assert!(g.uplift_m>=0.0 && g.uplift_m<=420.0);
+            assert!((a.elevation_m(x,z)-a.elevation_m(x+0.1,z)).abs()<10.0);
+        }
+    }
+    #[test] fn terrain_has_ocean_basin_and_emerged_land() {
+        let w=World::new(42);
+        let mut sea=false;let mut land=false;
+        for z in (-18..=18).step_by(3) {for x in (-18..=18).step_by(3) {
+            let h=w.elevation_m(x as f64*256.0,z as f64*256.0);
+            sea|=h<SEA_LEVEL_M as f64-5.0;
+            land|=h>SEA_LEVEL_M as f64+5.0;
+        }}
+        assert!(sea && land, "coastline should exist within the test region");
+    }
+
 }

@@ -3,10 +3,10 @@
 mod camera;
 mod terrain;
 
-use std::{collections::HashMap, sync::Arc, time::{Duration,Instant}};
-use aion_world::World;
+use std::{collections::HashMap, sync::{Arc,mpsc::{self,Receiver,Sender}}, time::{Duration,Instant}};
+use aion_world::{World,CHUNK_METRES};
 use bytemuck::{Pod,Zeroable};
-use glam::Mat4;
+use glam::{Vec3,Mat4};
 use wgpu::util::DeviceExt;
 use winit::{
     event::{DeviceEvent, ElementState, Event, MouseButton, WindowEvent},
@@ -15,7 +15,7 @@ use winit::{
     window::{CursorGrabMode,WindowBuilder,Window},
 };
 use camera::{Camera,Keys};
-use terrain::{Mesh, Vertex,build_mesh,chunk_key,ordered_neighbours};
+use terrain::{Mesh, Vertex,build_mesh_lod,water_mesh,lod_at,chunk_key,ordered_neighbours};
 
 const RADIUS: i32=3; // up to 49 chunks / ~1.8 km square resident
 const DEFAULT_SEED:u64=42;
@@ -28,18 +28,41 @@ struct Uniforms {
     sun: [f32;4],
 }
 
-struct GpuChunk { vertex:wgpu::Buffer, index:wgpu::Buffer, count:u32 }
+type TerrainJob=(i32,i32,u8);
+type TerrainResult=(i32,i32,u8,Mesh);
+fn spawn_chunk_worker(seed:u64)->Result<(Sender<TerrainJob>,Receiver<TerrainResult>),String> {
+    let (job_sender,job_receiver)=mpsc::channel::<TerrainJob>();
+    let (result_sender,result_receiver)=mpsc::channel::<TerrainResult>();
+    std::thread::Builder::new().name("aion-terrain-builder".into()).spawn(move || {
+        let world=World::new(seed);
+        while let Ok((x,z,lod))=job_receiver.recv() {
+            let mesh=build_mesh_lod(&world,x,z,lod);
+            if result_sender.send((x,z,lod,mesh)).is_err() {break;}
+        }
+    }).map_err(|e|format!("Impossible de lancer le calcul du terrain : {e}"))?;
+    Ok((job_sender,result_receiver))
+}
+
+struct GpuChunk {
+    vertex:wgpu::Buffer, index:wgpu::Buffer, count:u32,
+    water_vertex:wgpu::Buffer, water_index:wgpu::Buffer, water_count:u32,
+    lod:u8,
+}
 struct Explorer {
     window:Arc<Window>,
     surface:wgpu::Surface<'static>,
     device:wgpu::Device, queue:wgpu::Queue,
     config:wgpu::SurfaceConfiguration,
     pipeline:wgpu::RenderPipeline,
+    water_pipeline:wgpu::RenderPipeline,
     bind_group:wgpu::BindGroup,
     uniform_buffer:wgpu::Buffer,
     depth:wgpu::TextureView,
     world:World, camera:Camera, keys:Keys,
     chunks:HashMap<(i32,i32),GpuChunk>,
+    pending_chunks:HashMap<(i32,i32),u8>,
+    chunk_jobs:Sender<TerrainJob>,
+    chunk_results:Receiver<TerrainResult>,
     cursor_locked:bool, last_frame:Instant, title_tick:Instant,
     rendered_frames:u32,
     seed:u64,
@@ -115,12 +138,30 @@ impl Explorer {
             }),
             multisample:wgpu::MultisampleState::default(),multiview:None,
         });
+        let water_pipeline=device.create_render_pipeline(&wgpu::RenderPipelineDescriptor{
+            label:Some("Ocean: transparent sea-level surface"),layout:Some(&layout),
+            vertex:wgpu::VertexState{module:&shader,entry_point:"vs_main",buffers:&[Vertex::layout()]},
+            fragment:Some(wgpu::FragmentState{module:&shader,entry_point:"fs_water",targets:&[Some(wgpu::ColorTargetState{
+                format,blend:Some(wgpu::BlendState::ALPHA_BLENDING),write_mask:wgpu::ColorWrites::ALL,
+            })]}),
+            primitive:wgpu::PrimitiveState{topology:wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format:None,front_face:wgpu::FrontFace::Ccw,cull_mode:None,
+                polygon_mode:wgpu::PolygonMode::Fill,unclipped_depth:false,conservative:false},
+            depth_stencil:Some(wgpu::DepthStencilState{
+                format:wgpu::TextureFormat::Depth24Plus,depth_write_enabled:false,
+                depth_compare:wgpu::CompareFunction::Less,
+                stencil:wgpu::StencilState::default(),bias:wgpu::DepthBiasState::default(),
+            }),
+            multisample:wgpu::MultisampleState::default(),multiview:None,
+        });
         let depth=depth_buffer(&device,config.width,config.height);
         let world=World::new(seed);
         let camera=Camera::new(&world);
         config.width=size.width.max(1);
-        Ok(Self{window,surface,device,queue,config,pipeline,bind_group,uniform_buffer,
-            depth,world,camera,keys:Keys::default(),chunks:HashMap::new(),cursor_locked:false,
+        let (chunk_jobs,chunk_results)=spawn_chunk_worker(seed)?;
+        Ok(Self{window,surface,device,queue,config,pipeline,water_pipeline,bind_group,uniform_buffer,
+            depth,world,camera,keys:Keys::default(),chunks:HashMap::new(),
+            pending_chunks:HashMap::new(),chunk_jobs,chunk_results,cursor_locked:false,
             last_frame:Instant::now(),title_tick:Instant::now(),rendered_frames:0,seed,adapter_name})
     }
     fn resize(&mut self,width:u32,height:u32) {
@@ -129,16 +170,23 @@ impl Explorer {
         self.surface.configure(&self.device,&self.config);
         self.depth=depth_buffer(&self.device,width,height);
     }
-    fn add_chunk(&mut self,x:i32,z:i32) {
-        let source=self.world.chunk(x,z);
-        let Mesh{vertices,indices}=build_mesh(&source);
+    fn add_chunk(&mut self,x:i32,z:i32,lod:u8,mesh:Mesh) {
+        let Mesh{vertices,indices}=mesh;
         let vertex=self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
-            label:Some("Chunk vertices"),contents:bytemuck::cast_slice(&vertices),usage:wgpu::BufferUsages::VERTEX,
+            label:Some("Terrain LOD vertices"),contents:bytemuck::cast_slice(&vertices),usage:wgpu::BufferUsages::VERTEX,
         });
         let index=self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
-            label:Some("Chunk triangles"),contents:bytemuck::cast_slice(&indices),usage:wgpu::BufferUsages::INDEX,
+            label:Some("Terrain LOD triangles"),contents:bytemuck::cast_slice(&indices),usage:wgpu::BufferUsages::INDEX,
         });
-        self.chunks.insert((x,z),GpuChunk{vertex,index,count:indices.len() as u32});
+        let water=water_mesh(x,z);
+        let water_vertex=self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
+            label:Some("Ocean surface vertices"),contents:bytemuck::cast_slice(&water.vertices),usage:wgpu::BufferUsages::VERTEX,
+        });
+        let water_index=self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
+            label:Some("Ocean surface triangles"),contents:bytemuck::cast_slice(&water.indices),usage:wgpu::BufferUsages::INDEX,
+        });
+        self.chunks.insert((x,z),GpuChunk{vertex,index,count:indices.len() as u32,
+            water_vertex,water_index,water_count:water.indices.len() as u32,lod});
     }
     fn update(&mut self) {
         let now=Instant::now();
@@ -147,13 +195,39 @@ impl Explorer {
         self.camera.update(&self.world,&self.keys,dt);
         let (cx,cz)=chunk_key(self.camera.position.x as f64,self.camera.position.z as f64);
         self.chunks.retain(|&(x,z),_|(x-cx).abs()<=RADIUS && (z-cz).abs()<=RADIUS);
-        // Limit terrain generation to one new chunk per frame to avoid stutters.
-        if let Some((x,z))=ordered_neighbours(cx,cz,RADIUS).into_iter()
-            .find(|key|!self.chunks.contains_key(key)) {self.add_chunk(x,z);}
+        // The heavy mesh generation runs on a background thread; never freeze
+        // the Win32 event loop while sampling 2m terrain or vegetation.
+        for _ in 0..2 {
+            match self.chunk_results.try_recv() {
+                Ok((x,z,lod,mesh)) => {
+                    if self.pending_chunks.get(&(x,z))==Some(&lod) {
+                        self.pending_chunks.remove(&(x,z));
+                    }
+                    if (x-cx).abs()<=RADIUS && (z-cz).abs()<=RADIUS &&
+                        lod_at(x-cx,z-cz)==lod {
+                        self.add_chunk(x,z,lod,mesh);
+                    }
+                },
+                Err(_) => break,
+            }
+        }
+        if self.pending_chunks.len()<8 {
+            if let Some((x,z))=ordered_neighbours(cx,cz,RADIUS).into_iter()
+                .find(|&(x,z)|{
+                    let needed=lod_at(x-cx,z-cz);
+                    self.chunks.get(&(x,z)).map(|v|v.lod!=needed).unwrap_or(true)
+                        && self.pending_chunks.get(&(x,z))!=Some(&needed)
+                }) {
+                let lod=lod_at(x-cx,z-cz);
+                if self.chunk_jobs.send((x,z,lod)).is_ok() {
+                    self.pending_chunks.insert((x,z),lod);
+                }
+            }
+        }
         self.rendered_frames+=1;
         if now.duration_since(self.title_tick)>=Duration::from_secs(1) {
             let sample=self.world.sample(self.camera.position.x as f64,self.camera.position.z as f64);
-            self.window.set_title(&format!("PRIMORDIA 0.11 | {} FPS | {} chunks | {:?} | ({:.0},{:.0},{:.0})m | GPU: {} | W/A/S/D marcher, Shift courir, souris regarder, F voler, Esc libérer",
+            self.window.set_title(&format!("PRIMORDIA 0.12 | {} FPS | {} chunks | {:?} | ({:.0},{:.0},{:.0})m | GPU: {} | WASD bouger, ESPACE sauter, Shift sprinter, F voler, Esc libérer",
                 self.rendered_frames,self.chunks.len(),sample.biome,
                 self.camera.position.x,self.camera.position.y,self.camera.position.z,self.adapter_name));
             self.rendered_frames=0;self.title_tick=now;
@@ -189,6 +263,12 @@ impl Explorer {
                 pass.set_vertex_buffer(0,chunk.vertex.slice(..));
                 pass.set_index_buffer(chunk.index.slice(..),wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..chunk.count,0,0..1);
+            }
+            pass.set_pipeline(&self.water_pipeline);
+            for chunk in self.chunks.values(){
+                pass.set_vertex_buffer(0,chunk.water_vertex.slice(..));
+                pass.set_index_buffer(chunk.water_index.slice(..),wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..chunk.water_count,0,0..1);
             }
         }
         self.queue.submit(Some(encoder.finish()));
@@ -242,7 +322,7 @@ fn show_error(message:&str){eprintln!("{message}");}
 fn self_test()->Result<(),String> {
     let w=World::new(DEFAULT_SEED);
     for &(x,z) in &[(-2,3),(0,0),(2,-1)] {
-        let m=build_mesh(&w.chunk(x,z));
+        let m=build_mesh_lod(&w,x,z,2);
         if m.vertices.len()<1089||m.indices.len()<6144{return Err("Invalid world chunk mesh".into())}
         if m.indices.iter().any(|&i|i>=m.vertices.len() as u32) {return Err("Index out of bounds".into())}
     }
@@ -256,7 +336,7 @@ fn self_test()->Result<(),String> {
 fn main() {
     #[cfg(windows)]
     std::panic::set_hook(Box::new(|info| {
-        let message=format!("PRIMORDIA a rencontré une erreur interne :\\n\\n{info}\\n\\nDétails enregistrés dans le dossier temporaire.");
+        let message=format!("PRIMORDIA a rencontré une erreur interne :\n\n{info}\n\nDétails enregistrés dans le dossier temporaire.");
         let _=std::fs::write(std::env::temp_dir().join("primordia-startup-error.txt"), &message);
         show_error(&message);
     }));
@@ -282,7 +362,7 @@ fn run()->Result<(),String> {
         .map(|pair|pair[1].parse::<u64>().map_err(|_|"Usage: --seed <u64>".to_string()))
         .transpose()?.unwrap_or(DEFAULT_SEED);
     let event_loop=EventLoop::new().map_err(|e|e.to_string())?;
-    let window=Arc::new(WindowBuilder::new().with_title("PRIMORDIA 0.11 - GPU Explorer")
+    let window=Arc::new(WindowBuilder::new().with_title("PRIMORDIA 0.12 - Geological Coastlines")
         .with_inner_size(winit::dpi::LogicalSize::new(1360.,820.))
         .build(&event_loop).map_err(|e|e.to_string())?);
     let mut app=pollster::block_on(Explorer::new(window.clone(),seed))?;
@@ -304,7 +384,8 @@ fn run()->Result<(),String> {
                         set_key(&mut app.keys,code,pressed);
                         if pressed&&!event.repeat {match code {
                             KeyCode::Escape=>app.grab(false),
-                            KeyCode::KeyF=>app.camera.flying=!app.camera.flying,
+                            KeyCode::KeyF=>app.camera.toggle_flight(),
+                            KeyCode::Space=>app.camera.jump(),
                             KeyCode::KeyR=>{
                                 app.world=World::new(app.seed);app.camera=Camera::new(&app.world);
                                 app.chunks.clear();
