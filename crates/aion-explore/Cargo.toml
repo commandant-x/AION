@@ -1,0 +1,14 @@
+[package]
+name = "aion-explore"
+version = "0.11.0"
+edition = "2021"
+license = "MIT"
+description = "GPU-first-person exploratory terrain viewer for PRIMORDIA"
+
+[dependencies]
+aion-world = { path = "../aion-world" }
+wgpu = "0.19"
+winit = "0.29"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.27"
+pollster = "0.3"
