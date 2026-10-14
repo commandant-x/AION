@@ -28,15 +28,15 @@ jobs:
       - name: Core physics self-test
         shell: pwsh
         run: |
-          & .\target\release\aion-window.exe --self-test
-          $code = $LASTEXITCODE
+          $p = Start-Process -FilePath "$PWD\target\release\aion-window.exe" -ArgumentList "--self-test" -Wait -PassThru
+          $code = $p.ExitCode
           Get-Content "$env:TEMP\aion-gui-self-test.txt"
           if ($code -ne 0) { throw 'Rust solver test failed' }
       - name: Native Win32 window and draw smoke test
         shell: pwsh
         run: |
-          & .\target\release\aion-window.exe --window-smoke
-          if ($LASTEXITCODE -ne 0) { throw 'Windows GUI window creation or draw failed' }
+          $p = Start-Process -FilePath "$PWD\target\release\aion-window.exe" -ArgumentList "--window-smoke" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw 'Windows GUI window creation or draw failed' }
       - name: Upload verified graphical .exe
         uses: actions/upload-artifact@v4
         with:
