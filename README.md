@@ -1,5 +1,8 @@
 # AION CORE 0.9 — Portage Rust : compilation contrôlée
 
+> **État validé (14 octobre 2026)** : le moteur `aion-rust-sim` et son exécutable console `aion-rust-headless.exe` ont été compilés et exécutés dans GitHub Actions sous Windows et Linux. Tests, sauvegarde AION7 et comparaison d'expériences : [voir l'exécution réussie](https://github.com/commandant-x/AION/actions/runs/38558593186). Le visualiseur graphique historique reste basé sur C ; aucun moteur GPU 3D Rust n'est encore livré.
+
+
 > État : code Rust candidat, **non compilé dans ce conteneur**. Deux `.exe` C de référence sont fournis. Pour générer et tester le véritable exécutable Rust, suivre [docs/INSTALL_GITHUB_CI_FR.md](docs/INSTALL_GITHUB_CI_FR.md).
 
 # AION / PRIMORDIA CORE 0.8 — REPRODUCIBLE EXPERIMENTS
