@@ -1,7 +1,7 @@
 //! First-person locomotion: gravity, a deliberate jump, terrain and ocean contact.
 //! All units are SI (metres and seconds). This is a kinematic character controller,
 //! not the material solver, and swimming is currently represented by surface support.
-use aion_world::{World, SEA_LEVEL_M};
+use aion_world::{World, Earthworks, SEA_LEVEL_M};
 use glam::{Mat4,Vec3};
 
 const EYE_HEIGHT: f32 = 1.8;
@@ -44,6 +44,9 @@ impl Camera {
         Vec3::new(self.yaw.sin()*self.pitch.cos(),self.pitch.sin(),-self.yaw.cos()*self.pitch.cos())
     }
     pub fn update(&mut self,world:&World,keys:&Keys,dt:f32) {
+        self.update_with_edits(world,keys,dt,None);
+    }
+    pub fn update_with_edits(&mut self,world:&World,keys:&Keys,dt:f32,edits:Option<&Earthworks>) {
         let dt=dt.clamp(0.0,0.075);
         let forward=Vec3::new(self.yaw.sin(),0.0,-self.yaw.cos());
         let right=Vec3::new(-forward.z,0.0,forward.x);
@@ -54,8 +57,8 @@ impl Camera {
         let speed=if keys.sprint { 30.0 }else{9.0};
         if motion.length_squared()>0.0 && dt>0.0 {
             let candidate=self.position+motion.normalize()*speed*dt;
-            let current_floor=surface_eye_height(world,self.position.x,self.position.z);
-            let next_floor=surface_eye_height(world,candidate.x,candidate.z);
+            let current_floor=surface_eye_height_edited(world,edits,self.position.x,self.position.z);
+            let next_floor=surface_eye_height_edited(world,edits,candidate.x,candidate.z);
             let horizontal=((candidate.x-self.position.x).powi(2)+(candidate.z-self.position.z).powi(2)).sqrt();
             if self.flying || !self.grounded || next_floor-current_floor <=
                 MAX_STEP_GRADIENT*horizontal+0.2 {
@@ -65,7 +68,7 @@ impl Camera {
         if !self.flying {
             self.vertical_speed-=GRAVITY*dt;
             self.position.y+=self.vertical_speed*dt;
-            let floor=surface_eye_height(world,self.position.x,self.position.z);
+            let floor=surface_eye_height_edited(world,edits,self.position.x,self.position.z);
             if self.position.y<=floor {
                 self.position.y=floor;
                 self.vertical_speed=0.0;
@@ -81,6 +84,11 @@ impl Camera {
 fn surface_eye_height(world:&World,x:f32,z:f32)->f32 {
     // The ocean is a visible, collidable support surface (real buoyancy remains TODO).
     (world.elevation_m(x as f64,z as f64) as f32).max(SEA_LEVEL_M)+EYE_HEIGHT
+}
+fn surface_eye_height_edited(world:&World,edits:Option<&Earthworks>,x:f32,z:f32)->f32 {
+    let raw=match edits {Some(e)=>e.elevation_m(world,x as f64,z as f64) as f32,
+                         None=>world.elevation_m(x as f64,z as f64) as f32};
+    raw.max(SEA_LEVEL_M)+EYE_HEIGHT
 }
 fn find_coastal_spawn(world:&World)->(f32,f32) {
     // Search a fixed deterministic patch for an accessible coast. Both directions

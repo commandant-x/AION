@@ -1,6 +1,9 @@
 //! PRIMORDIA: deterministic terrain, synthetic geologic structure and coarse biomes.
 //! These are geological process-informed proxies, NOT a plate-tectonics or hydrology solver.
 
+pub mod earthworks;
+pub use earthworks::{Earthworks,Material,material_at};
+
 pub const SEA_LEVEL_M: f32 = 0.0;
 pub const CHUNK_QUADS: usize = 32;
 pub const CELL_METRES: f64 = 8.0;

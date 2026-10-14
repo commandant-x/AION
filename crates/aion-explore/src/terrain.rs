@@ -1,6 +1,6 @@
 //! Deterministic indexed surface mesh for the multiresolution world model.
 //! Geometry (including chunk coordinates) is defined in metres.
-use aion_world::{Biome, Chunk, World, CELL_METRES, CHUNK_QUADS, CHUNK_METRES, SEA_LEVEL_M};
+use aion_world::{Biome, Chunk, World, Earthworks, CELL_METRES, CHUNK_QUADS, CHUNK_METRES, SEA_LEVEL_M};
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -85,6 +85,9 @@ pub fn lod_at(dx:i32,dz:i32)->u8 {
     if radius==0 {0} else if radius<=1 {1} else {2}
 }
 pub fn build_mesh_lod(world:&World,x:i32,z:i32,lod:u8)->Mesh {
+    build_mesh_lod_edited(world,x,z,lod,None)
+}
+pub fn build_mesh_lod_edited(world:&World,x:i32,z:i32,lod:u8,edits:Option<&Earthworks>)->Mesh {
     let quads=CHUNK_QUADS << (2-lod.min(2));
     let side=quads+1;
     let step=CHUNK_METRES/quads as f64;
@@ -92,7 +95,8 @@ pub fn build_mesh_lod(world:&World,x:i32,z:i32,lod:u8)->Mesh {
     for iz in 0..side {for ix in 0..side {
         let wx=x as f64*CHUNK_METRES+ix as f64*step;
         let wz=z as f64*CHUNK_METRES+iz as f64*step;
-        heights.push(world.elevation_m(wx,wz) as f32);
+        let height=match edits {Some(e)=>e.elevation_m(world,wx,wz),None=>world.elevation_m(wx,wz)};
+        heights.push(height as f32);
     }}
     let mut vertices=Vec::with_capacity(side*side+4*side);
     for iz in 0..side {for ix in 0..side {
@@ -107,10 +111,14 @@ pub fn build_mesh_lod(world:&World,x:i32,z:i32,lod:u8)->Mesh {
         let wz=z as f64*CHUNK_METRES+iz as f64*step;
         let h=at(ix,iz);
         let biome=world.biome_at(wx,wz,h as f64,(sx*sx+sz*sz).sqrt() as f64);
-        vertices.push(Vertex {
-            position:[wx as f32,h,wz as f32],normal,
-            color:shade(biome,h,(1.0/inv.max(0.01)-1.0).max(0.0)),
-        });
+        let base=shade(biome,h,(1.0/inv.max(0.01)-1.0).max(0.0));
+        let color=if let Some(e)=edits {
+            if e.offset_m(wx,wz).abs()>0.06 {
+                let earth_color=e.surface_material(world,wx,wz).color();
+                std::array::from_fn(|i|base[i]*0.14+earth_color[i]*0.86)
+            } else { base }
+        }else{base};
+        vertices.push(Vertex { position:[wx as f32,h,wz as f32],normal,color });
     }}
     let mut indices=Vec::with_capacity(quads*quads*6+quads*4*6);
     for iz in 0..quads {for ix in 0..quads {
@@ -120,7 +128,16 @@ pub fn build_mesh_lod(world:&World,x:i32,z:i32,lod:u8)->Mesh {
     }}
     append_skirts(&mut vertices,&mut indices,quads);
     // Decoration is sampled at the stable original 8m grid, regardless of LOD.
-    append_procedural_trees(&world.chunk(x,z),&mut vertices,&mut indices);
+    let mut tree_chunk=world.chunk(x,z);
+    if let Some(edits)=edits {
+        for iz in 0..Chunk::SIDE {for ix in 0..Chunk::SIDE {
+            let wx=x as f64*CHUNK_METRES+ix as f64*CELL_METRES;
+            let wz=z as f64*CHUNK_METRES+iz as f64*CELL_METRES;
+            let id=Chunk::index(ix,iz);
+            tree_chunk.heights[id]=edits.elevation_m(world,wx,wz) as f32;
+        }}
+    }
+    append_procedural_trees(&tree_chunk,&mut vertices,&mut indices);
     Mesh{vertices,indices}
 }
 fn append_skirts(v:&mut Vec<Vertex>,i:&mut Vec<u32>,quads:usize) {
@@ -307,4 +324,19 @@ pub fn ordered_neighbours(cx:i32,cz:i32,radius:i32)->Vec<(i32,i32)> {
         assert!(m.indices.iter().all(|&id|(id as usize)<m.vertices.len()));
     }
 
+}
+
+#[cfg(test)] mod earth_mesh_tests {
+ use super::*;
+ #[test] fn dug_mesh_contains_visible_crater_and_material_color() {
+    let world=World::new(42);let mut edits=Earthworks::new(42);
+    let before=build_mesh_lod(&world,0,0,0);
+    let x=40.0;let z=60.0;
+    for _ in 0..4{edits.excavate(&world,x,z).unwrap();}
+    let after=build_mesh_lod_edited(&world,0,0,0,Some(&edits));
+    let side=129;let id=(30*side+20) as usize;
+    assert!((after.vertices[id].position[1]-before.vertices[id].position[1]+2.0).abs()<0.01);
+    assert_ne!(after.vertices[id].color,before.vertices[id].color);
+    assert_eq!(after.indices.len(),before.indices.len());
+ }
 }
