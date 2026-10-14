@@ -1,3 +1,14 @@
+# PRIMORDIA 0.12 — saut, géologie structurée et océan visible
+
+**Nouveau :** saut (ESPACE), gravité et collisions kinematiques avec le sol ; haute résolution adaptative 2/4/8 m et génération asynchrone pour préserver la réactivité ; surface océanique translucide à zéro mètre et fond marin ; soulèvements, dureté de roche et vallées incisées par champs géologiques procéduraux.
+
+**Commandes :** clic gauche pour activer la souris, WASD marcher, Espace sauter, Shift courir, F voler, Espace/CTRL monter/descendre en vol, R réinitialiser, Échap libérer la souris. Paramètre `--seed 42`.
+
+**Limites :** la mer n'est pas un fluide simulé ; il n'y a pas encore de transport de sédiments, de tectonique réelle ni d'écologie. Les nouveaux champs sont procéduraux, pas une simulation physique complète. Le Goal final reste ouvert.
+
+**Validation :** tests terrain/locomotion et compilation Windows/Linux, autotest et création de fenêtre sur runner CI ([workflow](https://github.com/commandant-x/AION/actions/workflows/aion-gpu-explorer.yml)). Validation graphique réelle sur le GPU utilisateur : à confirmer.
+
+---
 # PRIMORDIA 0.11 — Premier monde 3D GPU explorable
 
 **NOUVEAU :** `crates/aion-explore` est un explorateur Windows/Linux construit en Rust avec wgpu et winit. Paysages procéduraux, continuité de terrain, streaming de chunks, caméra à la première personne, couleurs de biomes, éclairage et brouillard. La végétation est **visuelle uniquement**.
