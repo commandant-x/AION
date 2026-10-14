@@ -3,8 +3,8 @@
 mod camera;
 mod terrain;
 
-use std::{collections::HashMap, sync::{Arc,mpsc::{self,Receiver,Sender}}, time::{Duration,Instant}};
-use aion_world::{World,CHUNK_METRES};
+use std::{collections::HashMap, path::PathBuf, sync::{Arc,RwLock,mpsc::{self,Receiver,Sender}}, time::{Duration,Instant}};
+use aion_world::{World,Earthworks,Material,CHUNK_METRES};
 use bytemuck::{Pod,Zeroable};
 use glam::{Vec3,Mat4};
 use wgpu::util::DeviceExt;
@@ -15,7 +15,7 @@ use winit::{
     window::{CursorGrabMode,WindowBuilder,Window},
 };
 use camera::{Camera,Keys};
-use terrain::{Mesh, Vertex,build_mesh_lod,water_mesh,lod_at,chunk_key,ordered_neighbours};
+use terrain::{Mesh, Vertex,build_mesh_lod,build_mesh_lod_edited,water_mesh,lod_at,chunk_key,ordered_neighbours};
 
 const RADIUS: i32=3; // up to 49 chunks / ~1.8 km square resident
 const DEFAULT_SEED:u64=42;
@@ -28,16 +28,18 @@ struct Uniforms {
     sun: [f32;4],
 }
 
-type TerrainJob=(i32,i32,u8);
-type TerrainResult=(i32,i32,u8,Mesh);
-fn spawn_chunk_worker(seed:u64)->Result<(Sender<TerrainJob>,Receiver<TerrainResult>),String> {
+type TerrainJob=(i32,i32,u8,u64);
+type TerrainResult=(i32,i32,u8,u64,Mesh);
+fn spawn_chunk_worker(seed:u64,earth:Arc<RwLock<Earthworks>>)->Result<(Sender<TerrainJob>,Receiver<TerrainResult>),String> {
     let (job_sender,job_receiver)=mpsc::channel::<TerrainJob>();
     let (result_sender,result_receiver)=mpsc::channel::<TerrainResult>();
     std::thread::Builder::new().name("aion-terrain-builder".into()).spawn(move || {
         let world=World::new(seed);
-        while let Ok((x,z,lod))=job_receiver.recv() {
-            let mesh=build_mesh_lod(&world,x,z,lod);
-            if result_sender.send((x,z,lod,mesh)).is_err() {break;}
+        while let Ok((x,z,lod,requested_revision))=job_receiver.recv() {
+            let snapshot=earth.read().expect("Earthworks lock poisoned").clone();
+            if snapshot.revision!=requested_revision { continue; }
+            let mesh=build_mesh_lod_edited(&world,x,z,lod,Some(&snapshot));
+            if result_sender.send((x,z,lod,requested_revision,mesh)).is_err() {break;}
         }
     }).map_err(|e|format!("Impossible de lancer le calcul du terrain : {e}"))?;
     Ok((job_sender,result_receiver))
@@ -60,7 +62,11 @@ struct Explorer {
     depth:wgpu::TextureView,
     world:World, camera:Camera, keys:Keys,
     chunks:HashMap<(i32,i32),GpuChunk>,
-    pending_chunks:HashMap<(i32,i32),u8>,
+    pending_chunks:HashMap<(i32,i32),(u8,u64)>,
+    earth:Arc<RwLock<Earthworks>>,
+    selected:Material,
+    action_status:String,
+    save_path:PathBuf,
     chunk_jobs:Sender<TerrainJob>,
     chunk_results:Receiver<TerrainResult>,
     cursor_locked:bool, last_frame:Instant, title_tick:Instant,
@@ -158,11 +164,72 @@ impl Explorer {
         let world=World::new(seed);
         let camera=Camera::new(&world);
         config.width=size.width.max(1);
-        let (chunk_jobs,chunk_results)=spawn_chunk_worker(seed)?;
+        let save_path=std::env::current_exe().map_err(|e|e.to_string())?
+            .parent().ok_or("Dossier exécutable absent")?
+            .join(format!("PRIMORDIA_{}_terrain.aion13",seed));
+        let loaded=if save_path.exists() { Earthworks::load(&world,&save_path) } else {Ok(Earthworks::new(seed))};
+        let (initial_edits,load_status)=match loaded {
+            Ok(e)=>(e,"Q creuser | E déposer | 1-8 choisir matériau | P enregistrer | L charger".to_string()),
+            Err(msg)=>(Earthworks::new(seed),format!("ERREUR sauvegarde: {msg} (fichier conservé)")),
+        };
+        let earth=Arc::new(RwLock::new(initial_edits));
+        let (chunk_jobs,chunk_results)=spawn_chunk_worker(seed,earth.clone())?;
         Ok(Self{window,surface,device,queue,config,pipeline,water_pipeline,bind_group,uniform_buffer,
             depth,world,camera,keys:Keys::default(),chunks:HashMap::new(),
-            pending_chunks:HashMap::new(),chunk_jobs,chunk_results,cursor_locked:false,
+            pending_chunks:HashMap::new(),chunk_jobs,chunk_results,earth,
+            selected:Material::Soil,action_status:load_status,save_path,cursor_locked:false,
             last_frame:Instant::now(),title_tick:Instant::now(),rendered_frames:0,seed,adapter_name})
+    }
+    fn target_ground(&self)->(f64,f64) {
+        let start=self.camera.position;
+        let ray=self.camera.forward();
+        let earth=self.earth.read().expect("earthworks lock poisoned");
+        for i in 2..=84 {
+            let t=i as f32*0.5;
+            let p=start+ray*t;
+            if p.y as f64<=earth.elevation_m(&self.world,p.x as f64,p.z as f64) {
+                return (p.x as f64,p.z as f64);
+            }
+        }
+        let p=start+glam::Vec3::new(ray.x,0.0,ray.z).normalize_or_zero()*8.0;
+        (p.x as f64,p.z as f64)
+    }
+    fn changed_ground(&mut self,point:(f64,f64)) {
+        let (cx,cz)=chunk_key(point.0,point.1);
+        // Recreate affected meshes at the new revision, including seam neighbours.
+        for dz in -1..=1 {for dx in -1..=1 {
+            self.chunks.remove(&(cx+dx,cz+dz));
+        }}
+        // All queued jobs carry the previous global revision.
+        self.pending_chunks.clear();
+    }
+    fn excavate(&mut self) {
+        let point=self.target_ground();
+        let result=self.earth.write().expect("earthworks lock poisoned").excavate(&self.world,point.0,point.1);
+        match result {
+            Ok(m)=>{self.action_status=format!("Extrait 2 m³ de {}",m.name());self.changed_ground(point);},
+            Err(e)=>self.action_status=e,
+        }
+    }
+    fn deposit(&mut self) {
+        let point=self.target_ground();
+        let result=self.earth.write().expect("earthworks lock poisoned").deposit(&self.world,point.0,point.1,self.selected);
+        match result {
+            Ok(())=>{self.action_status=format!("Déposé 2 m³ de {}",self.selected.name());self.changed_ground(point);},
+            Err(e)=>self.action_status=e,
+        }
+    }
+    fn save_edits(&mut self) {
+        let r=self.earth.read().expect("earthworks lock poisoned").save(&self.save_path);
+        self.action_status=match r {Ok(())=>format!("Terrain enregistré : {}",self.save_path.display()),Err(e)=>format!("ÉCHEC sauvegarde : {e}")};
+    }
+    fn load_edits(&mut self) {
+        match Earthworks::load(&self.world,&self.save_path) {
+            Ok(e)=>{*self.earth.write().expect("earthworks lock poisoned")=e;
+                self.chunks.clear();self.pending_chunks.clear();
+                self.action_status="Terrain chargé avec bilan matière vérifié".into();},
+            Err(e)=>self.action_status=format!("ÉCHEC chargement : {e}"),
+        }
     }
     fn resize(&mut self,width:u32,height:u32) {
         if width==0||height==0{return;}
@@ -192,19 +259,23 @@ impl Explorer {
         let now=Instant::now();
         let dt=now.duration_since(self.last_frame).as_secs_f32().min(0.075);
         self.last_frame=now;
-        self.camera.update(&self.world,&self.keys,dt);
+        {
+            let terrain=self.earth.read().expect("earthworks lock poisoned");
+            self.camera.update_with_edits(&self.world,&self.keys,dt,Some(&terrain));
+        }
         let (cx,cz)=chunk_key(self.camera.position.x as f64,self.camera.position.z as f64);
         self.chunks.retain(|&(x,z),_|(x-cx).abs()<=RADIUS && (z-cz).abs()<=RADIUS);
         // The heavy mesh generation runs on a background thread; never freeze
         // the Win32 event loop while sampling 2m terrain or vegetation.
         for _ in 0..2 {
             match self.chunk_results.try_recv() {
-                Ok((x,z,lod,mesh)) => {
-                    if self.pending_chunks.get(&(x,z))==Some(&lod) {
+                Ok((x,z,lod,revision,mesh)) => {
+                    if self.pending_chunks.get(&(x,z))==Some(&(lod,revision)) {
                         self.pending_chunks.remove(&(x,z));
                     }
                     if (x-cx).abs()<=RADIUS && (z-cz).abs()<=RADIUS &&
-                        lod_at(x-cx,z-cz)==lod {
+                        lod_at(x-cx,z-cz)==lod &&
+                        self.earth.read().expect("earthworks lock poisoned").revision==revision {
                         self.add_chunk(x,z,lod,mesh);
                     }
                 },
@@ -216,20 +287,24 @@ impl Explorer {
                 .find(|&(x,z)|{
                     let needed=lod_at(x-cx,z-cz);
                     self.chunks.get(&(x,z)).map(|v|v.lod!=needed).unwrap_or(true)
-                        && self.pending_chunks.get(&(x,z))!=Some(&needed)
+                        && self.pending_chunks.get(&(x,z)).map(|(l,r)|*l==needed &&
+                            *r==self.earth.read().expect("earthworks lock poisoned").revision).unwrap_or(false)==false
                 }) {
                 let lod=lod_at(x-cx,z-cz);
-                if self.chunk_jobs.send((x,z,lod)).is_ok() {
-                    self.pending_chunks.insert((x,z),lod);
+                let revision=self.earth.read().expect("earthworks lock poisoned").revision;
+                if self.chunk_jobs.send((x,z,lod,revision)).is_ok() {
+                    self.pending_chunks.insert((x,z),(lod,revision));
                 }
             }
         }
         self.rendered_frames+=1;
         if now.duration_since(self.title_tick)>=Duration::from_secs(1) {
             let sample=self.world.sample(self.camera.position.x as f64,self.camera.position.z as f64);
-            self.window.set_title(&format!("PRIMORDIA 0.12 | {} FPS | {} chunks | {:?} | ({:.0},{:.0},{:.0})m | GPU: {} | WASD bouger, ESPACE sauter, Shift sprinter, F voler, Esc libérer",
-                self.rendered_frames,self.chunks.len(),sample.biome,
-                self.camera.position.x,self.camera.position.y,self.camera.position.z,self.adapter_name));
+            let earth=self.earth.read().expect("earthworks lock poisoned");
+            self.window.set_title(&format!("PRIMORDIA 0.13 | {} FPS | {} zones | {:?} | {} | sélection {} ({:.0} m³, {} kg/m³) | {} | Q creuser E déposer P/L sauvegarder | GPU {}",
+                self.rendered_frames,self.chunks.len(),sample.biome,self.action_status,
+                self.selected.name(),earth.inventory_volume_m3(self.selected),self.selected.density_kg_m3(),
+                earth.cell_count(),self.adapter_name));
             self.rendered_frames=0;self.title_tick=now;
         }
     }
@@ -330,6 +405,12 @@ fn self_test()->Result<(),String> {
     let keys=Keys{forward:true,..Default::default()};
     for _ in 0..100 {c.update(&w,&keys,0.016);}
     if !c.position.is_finite() {return Err("Nonfinite camera".into())}
+    let mut earth=Earthworks::new(w.seed);
+    let mat=earth.excavate(&w,0.0,0.0)?;
+    earth.deposit(&w,4.0,0.0,mat)?;
+    if !earth.material_balance_ok(){return Err("Earthworks conservation failed".into());}
+    let m=build_mesh_lod_edited(&w,0,0,0,Some(&earth));
+    if !m.vertices.iter().all(|v|v.position[1].is_finite()) {return Err("Earthworks mesh nonfinite".into());}
     Ok(())
 }
 
@@ -362,7 +443,7 @@ fn run()->Result<(),String> {
         .map(|pair|pair[1].parse::<u64>().map_err(|_|"Usage: --seed <u64>".to_string()))
         .transpose()?.unwrap_or(DEFAULT_SEED);
     let event_loop=EventLoop::new().map_err(|e|e.to_string())?;
-    let window=Arc::new(WindowBuilder::new().with_title("PRIMORDIA 0.12 - Geological Coastlines")
+    let window=Arc::new(WindowBuilder::new().with_title("PRIMORDIA 0.13 - Matières terrestres")
         .with_inner_size(winit::dpi::LogicalSize::new(1360.,820.))
         .build(&event_loop).map_err(|e|e.to_string())?);
     let mut app=pollster::block_on(Explorer::new(window.clone(),seed))?;
@@ -385,11 +466,20 @@ fn run()->Result<(),String> {
                         if pressed&&!event.repeat {match code {
                             KeyCode::Escape=>app.grab(false),
                             KeyCode::KeyF=>app.camera.toggle_flight(),
+                            KeyCode::KeyQ=>app.excavate(),
+                            KeyCode::KeyE=>app.deposit(),
+                            KeyCode::KeyP=>app.save_edits(),
+                            KeyCode::KeyL=>app.load_edits(),
+                            KeyCode::Digit1=>app.selected=Material::Soil,
+                            KeyCode::Digit2=>app.selected=Material::Sand,
+                            KeyCode::Digit3=>app.selected=Material::Clay,
+                            KeyCode::Digit4=>app.selected=Material::Gravel,
+                            KeyCode::Digit5=>app.selected=Material::Peat,
+                            KeyCode::Digit6=>app.selected=Material::Limestone,
+                            KeyCode::Digit7=>app.selected=Material::Granite,
+                            KeyCode::Digit8=>app.selected=Material::Basalt,
                             KeyCode::Space=>app.camera.jump(),
-                            KeyCode::KeyR=>{
-                                app.world=World::new(app.seed);app.camera=Camera::new(&app.world);
-                                app.chunks.clear();
-                            },
+                            KeyCode::KeyR=>{app.camera=Camera::new(&app.world);},
                             _=>(),
                         }}
                     }

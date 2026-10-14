@@ -1,3 +1,5 @@
+pub mod earthworks;
+pub use earthworks::{Earthworks,Material,material_at};
 //! PRIMORDIA: deterministic terrain, synthetic geologic structure and coarse biomes.
 //! These are geological process-informed proxies, NOT a plate-tectonics or hydrology solver.
 
