@@ -1,3 +1,11 @@
+# AION CORE 0.10 — Fenêtre Windows native en Rust
+
+**Nouvelle application graphique :** `aion-window.exe` (`cargo build --release -p aion-window`). Elle affiche une projection 3D interactive du solveur mécanique Rust : particules, liaisons, fractures, caméra orbitale, impact, traction, chaleur, pause et sauvegarde AION7. Il ne s'agit pas encore d'un moteur graphique GPU.
+
+**Validation CI Windows :** compilation, autotest du moteur, création de fenêtre Win32 et rendu graphique sur contexte GDI dans [GitHub Actions](https://github.com/commandant-x/AION/actions/runs/38562213009). Application affichée sur un PC utilisateur : à confirmer.
+
+**Commandes :** I impact, T traction, H chaleur, espace pause, R reset, S sauvegarde, L chargement, 1/2/3 matériaux, souris pour la caméra.
+
 # AION CORE 0.9 — Portage Rust : compilation contrôlée
 
 > **État validé (14 octobre 2026)** : le moteur `aion-rust-sim` et son exécutable console `aion-rust-headless.exe` ont été compilés et exécutés dans GitHub Actions sous Windows et Linux. Tests, sauvegarde AION7 et comparaison d'expériences : [voir l'exécution réussie](https://github.com/commandant-x/AION/actions/runs/38558593186). Le visualiseur graphique historique reste basé sur C ; aucun moteur GPU 3D Rust n'est encore livré.
