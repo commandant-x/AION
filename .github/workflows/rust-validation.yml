@@ -1,0 +1,53 @@
+name: AION - Rust Windows/Linux Validation
+on:
+  push:
+    paths:
+      - "Cargo.toml"
+      - "crates/**"
+      - "tests/**"
+      - "experiments/**"
+      - ".github/workflows/rust-validation.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  rust:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Unit and integration tests
+        run: cargo test --workspace --all-targets
+      - name: Build native Rust executable
+        run: cargo build --release -p aion-rust-sim --bin aion-rust-headless
+      - name: Windows executable smoke test
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & .\target\release\aion-rust-headless.exe --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Rust self-test failed' }
+          & .\target\release\aion-rust-headless.exe --resume tests/fixtures/sample_v7.aion7
+          if ($LASTEXITCODE -ne 0) { throw 'Checkpoint replay failed' }
+          & .\target\release\aion-rust-headless.exe --benchmark rust.csv
+          if ($LASTEXITCODE -ne 0) { throw 'Benchmark failed' }
+          python tests/validate_rust_benchmark_09.py rust.csv experiments/AION_CORE_0_8_reference.csv
+          if ($LASTEXITCODE -ne 0) { throw 'Cross-engine comparison failed' }
+      - name: Linux executable smoke test
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          ./target/release/aion-rust-headless --self-test
+          ./target/release/aion-rust-headless --resume tests/fixtures/sample_v7.aion7
+          ./target/release/aion-rust-headless --benchmark rust.csv
+          python3 tests/validate_rust_benchmark_09.py rust.csv experiments/AION_CORE_0_8_reference.csv
+      - name: Publish verified Windows executable
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: AION-RUST-WINDOWS-X64
+          path: target/release/aion-rust-headless.exe
+          if-no-files-found: error
