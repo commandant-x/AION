@@ -226,8 +226,8 @@ fn draw_world(dc:H,app:&App,rect:Rect){
   let (x,y,_)=project(a,cx,cy,scale,app.yaw,app.pitch);
   let (x2,y2,_)=project(b,cx,cy,scale,app.yaw,app.pitch);
   let k=e.damage.clamp(0.,1.);
-  let c=if k>.6{color(240,122,69)}else if k>.13{color(241,183,103)}else{color(80,143,164)};
-  line(dc,x,y,x2,y2,c,if k>.5{2}else{1});
+  let c=if k>0.6{color(240,122,69)}else if k>0.13{color(241,183,103)}else{color(80,143,164)};
+  line(dc,x,y,x2,y2,c,if k>0.5{2}else{1});
  }
  let mut nodes:Vec<_>=app.sim.nodes.iter().take(app.sim.node_count.max(0) as usize).collect();
  nodes.sort_by(|a,b|{
@@ -269,7 +269,7 @@ fn draw(dc:H,w:i32,h:i32,app:&App){
  text(dc,x,163,"STATUS",MUTED,11,true);
  text(dc,x+122,160,if app.paused{"PAUSED"}else{"RUNNING"},if app.paused{ORANGE}else{TEAL},15,true);
  text(dc,x,201,"ELAPSED",MUTED,11,true);
- text(dc,x+122,198,&format!("{:.2} s",app.sim.sim_time),TEXT,16,true);
+ text(dc,x+122,198,&format!("{:0.2} s",app.sim.sim_time),TEXT,16,true);
  text(dc,x,239,"NODES",MUTED,11,true);
  text(dc,x+122,236,&format!("{}",app.sim.node_count),TEXT,16,true);
  text(dc,x,277,"ACTIVE BONDS",MUTED,11,true);
@@ -277,7 +277,7 @@ fn draw(dc:H,w:i32,h:i32,app:&App){
  text(dc,x,315,"FRACTURES",MUTED,11,true);
  text(dc,x+122,312,&format!("{}",app.sim.fractures),color(245,154,102),16,true);
  text(dc,x,353,"MAX DAMAGE",MUTED,11,true);
- text(dc,x+122,350,&format!("{:.1}%",app.sim.max_damage*100.),TEXT,16,true);
+ text(dc,x+122,350,&format!("{:0.1}%",app.sim.max_damage*100.),TEXT,16,true);
  fill(dc,Rect::from_xywh(x,390,299,1),color(55,68,77));
  text(dc,x,402,"MATERIAL EXPERIMENT",TEXT,13,true);
  let materials=["STONE","FIBRE","BRITTLE"];
@@ -322,8 +322,8 @@ unsafe extern "system" fn wndproc(hwnd:H,msg:u32,wparam:usize,lparam:isize)->isi
      0x49=>a.action(0),0x54=>a.action(1),0x48=>a.action(2),0x20=>a.action(3),
      0x52=>a.action(4),0x53=>a.action(5),0x4C=>a.action(6),
      0x31=>a.material(0),0x32=>a.material(1),0x33=>a.material(2),
-     0x25=>a.yaw-=0.12,0x27=>a.yaw+=0.12,0x26=>a.pitch=(a.pitch+.09).min(1.25),
-     0x28=>a.pitch=(a.pitch-.09).max(-1.2),0x1B=>{drop(a);DestroyWindow(hwnd);return 0},_=>{}
+     0x25=>a.yaw-=0.12,0x27=>a.yaw+=0.12,0x26=>a.pitch=(a.pitch+0.09).min(1.25),
+     0x28=>a.pitch=(a.pitch-0.09).max(-1.2),0x1B=>{drop(a);DestroyWindow(hwnd);return 0},_=>{}
    }drop(a);InvalidateRect(hwnd,null(),0);0
  },
  WM_LBUTTONDOWN=>{
@@ -337,9 +337,9 @@ unsafe extern "system" fn wndproc(hwnd:H,msg:u32,wparam:usize,lparam:isize)->isi
  },
  WM_LBUTTONUP=>{app().lock().unwrap().dragging=false;0},
  WM_MOUSEMOVE=>{let x=lparam as i16 as i32;let y=(lparam>>16) as i16 as i32;
-   let mut a=app().lock().unwrap();if a.dragging{a.yaw+=(x-a.last.0) as f64*.009;a.pitch=(a.pitch+(y-a.last.1) as f64*.006).clamp(-1.2,1.2);a.last=(x,y);drop(a);InvalidateRect(hwnd,null(),0)}0
+   let mut a=app().lock().unwrap();if a.dragging{a.yaw+=(x-a.last.0) as f64*0.009;a.pitch=(a.pitch+(y-a.last.1) as f64*0.006).clamp(-1.2,1.2);a.last=(x,y);drop(a);InvalidateRect(hwnd,null(),0); }0
  },
- WM_MOUSEWHEEL=>{let delta=((wparam>>16) as i16) as i32;let mut a=app().lock().unwrap();a.zoom=(a.zoom*if delta>0{1.10}else{0.90}).clamp(.30,3.0);drop(a);InvalidateRect(hwnd,null(),0);0},
+ WM_MOUSEWHEEL=>{let delta=((wparam>>16) as i16) as i32;let mut a=app().lock().unwrap();a.zoom=(a.zoom*if delta>0{1.10}else{0.90}).clamp(0.30,3.0);drop(a);InvalidateRect(hwnd,null(),0);0},
  WM_SIZE=>{InvalidateRect(hwnd,null(),0);0},
  WM_DESTROY=>{KillTimer(hwnd,1);PostQuitMessage(0);0},
  WM_SETCURSOR=>DefWindowProcW(hwnd,msg,wparam,lparam),
