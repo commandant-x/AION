@@ -340,3 +340,98 @@ pub fn ordered_neighbours(cx:i32,cz:i32,radius:i32)->Vec<(i32,i32)> {
     assert_eq!(after.indices.len(),before.indices.len());
  }
 }
+
+/// Adds sparse 3D excavation faces to the ordinary procedural surface.
+/// A removed topmost voxel opens a 2m x 2m square in the heightfield, while
+/// any removed subsurface voxel reveals rock faces from its six neighbours.
+/// This is blocky volume geometry, not a smooth marching-cubes mesher.
+pub fn build_mesh_with_voxels(world:&World,x:i32,z:i32,lod:u8,
+    edits:Option<&Earthworks>,voxels:&aion_world::VoxelWorld)->Mesh {
+    let mut mesh=build_mesh_lod_edited(world,x,z,lod,edits);
+    if voxels.edited_count()==0 {return mesh;}
+    if lod==0 {
+        let quads=CHUNK_QUADS<<2;
+        let original=std::mem::take(&mut mesh.indices);
+        let open_columns:std::collections::HashSet<(i32,i32)>=voxels.edited_in_chunk(x,z)
+            .filter_map(|(k,edit)|if edit==aion_world::CellEdit::Air {Some((k.x,k.z))}else{None}).collect();
+        let mut filtered=Vec::with_capacity(original.len());
+        for (q,face) in original[..quads*quads*6].chunks_exact(6).enumerate() {
+            let px=x as f64*CHUNK_METRES+((q%quads) as f64+0.5)*2.0;
+            let pz=z as f64*CHUNK_METRES+((q/quads) as f64+0.5)*2.0;
+            if !open_columns.contains(&((px/2.0).floor() as i32,(pz/2.0).floor() as i32)) || !voxels.surface_open(world,px,pz){ filtered.extend_from_slice(face); }
+        }
+        filtered.extend_from_slice(&original[quads*quads*6..]);
+        mesh.indices=filtered;
+    }
+    append_exposed_voxel_faces(world,voxels,x,z,&mut mesh);
+    mesh
+}
+const VOXEL_DIRECTIONS:[[i32;3];6]=[[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+fn append_exposed_voxel_faces(world:&World,voxels:&aion_world::VoxelWorld,
+    cx:i32,cz:i32,mesh:&mut Mesh) {
+    use std::collections::BTreeSet;
+    let mut drawn:BTreeSet<(aion_world::VoxelKey,usize)>=BTreeSet::new();
+    for (key,_) in voxels.edited_in_chunk(cx,cz) {
+        for (d,offset) in VOXEL_DIRECTIONS.iter().enumerate() {
+            let Some(adjacent)=key.neighbour(*offset) else {continue};
+            let here=voxels.material(world,key);
+            let other=voxels.material(world,adjacent);
+            let visible=match (here,other){
+                (Some(mat),None)=>Some((key,d,mat)),
+                (None,Some(mat))=>Some((adjacent,d^1,mat)),
+                _=>None,
+            };
+            if let Some((solid,dir,material))=visible {
+                if drawn.insert((solid,dir)) {
+                    append_voxel_face(mesh,solid,dir,material.color());
+                }
+            }
+        }
+    }
+}
+fn append_voxel_face(mesh:&mut Mesh,key:aion_world::VoxelKey,dir:usize,color:[f32;3]) {
+    let x=key.x as f32*2.0;let y=key.y as f32*2.0;let z=key.z as f32*2.0;
+    let a=x+2.0;let b=y+2.0;let c=z+2.0;
+    let (normal,corners):([f32;3],[[f32;3];4])=match dir {
+        0=>([1.,0.,0.],[[a,y,z],[a,b,z],[a,b,c],[a,y,c]]),
+        1=>([-1.,0.,0.],[[x,y,c],[x,b,c],[x,b,z],[x,y,z]]),
+        2=>([0.,1.,0.],[[x,b,z],[x,b,c],[a,b,c],[a,b,z]]),
+        3=>([0.,-1.,0.],[[x,y,c],[x,y,z],[a,y,z],[a,y,c]]),
+        4=>([0.,0.,1.],[[a,y,c],[a,b,c],[x,b,c],[x,y,c]]),
+        _=>([0.,0.,-1.],[[x,y,z],[x,b,z],[a,b,z],[a,y,z]]),
+    };
+    let start=mesh.vertices.len() as u32;
+    for position in corners {
+        mesh.vertices.push(Vertex{position,normal,color});
+    }
+    mesh.indices.extend_from_slice(&[start,start+1,start+2,start,start+2,start+3]);
+}
+
+#[cfg(test)] mod voxel_mesh_tests {
+    use super::*;
+    use aion_world::{VoxelWorld,VoxelKey};
+    #[test] fn underground_void_has_six_exposed_faces() {
+        let world=World::new(33);
+        let mut v=VoxelWorld::new(world.seed);
+        let k=VoxelKey::at(11.0,world.elevation_m(11.0,11.0)-30.0,11.0).unwrap();
+        v.dig(&world,k).unwrap();
+        let base=build_mesh_lod(&world,0,0,0);
+        let edited=build_mesh_with_voxels(&world,0,0,0,None,&v);
+        assert_eq!(edited.indices.len(),base.indices.len()+36);
+        assert_eq!(edited.vertices.len(),base.vertices.len()+24);
+        assert!(edited.indices.iter().all(|&n|(n as usize)<edited.vertices.len()));
+    }
+    #[test] fn opened_roof_removes_surface_triangles_and_draws_walls(){
+        let world=World::new(18);
+        let mut v=VoxelWorld::new(18);
+        let x=11.0;let z=15.0;
+        let h=world.elevation_m(x,z);
+        let y=((h-1.0)/2.0).floor()*2.0+1.0;
+        let key=VoxelKey::at(x,y,z).unwrap();
+        v.dig(&world,key).unwrap();
+        assert!(v.surface_open(&world,x,z));
+        let m=build_mesh_with_voxels(&world,0,0,0,None,&v);
+        assert!(m.indices.iter().all(|&i|(i as usize)<m.vertices.len()));
+        assert!(m.vertices.len()>build_mesh_lod(&world,0,0,0).vertices.len());
+    }
+}

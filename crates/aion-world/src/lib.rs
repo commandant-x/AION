@@ -2,6 +2,8 @@
 //! These are geological process-informed proxies, NOT a plate-tectonics or hydrology solver.
 
 pub mod earthworks;
+pub mod voxels;
+pub use voxels::{VoxelWorld,VoxelKey,CellEdit,RayHit,VOXEL_VOLUME_M3};
 pub use earthworks::{Earthworks,Material,material_at};
 
 pub const SEA_LEVEL_M: f32 = 0.0;

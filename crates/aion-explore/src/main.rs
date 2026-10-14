@@ -4,7 +4,7 @@ mod camera;
 mod terrain;
 
 use std::{collections::HashMap, path::PathBuf, sync::{Arc,RwLock,mpsc::{self,Receiver,Sender}}, time::{Duration,Instant}};
-use aion_world::{World,Earthworks,Material,CHUNK_METRES};
+use aion_world::{World,Earthworks,Material,VoxelWorld,VOXEL_VOLUME_M3,CHUNK_METRES};
 use bytemuck::{Pod,Zeroable};
 use glam::{Vec3,Mat4};
 use wgpu::util::DeviceExt;
@@ -15,7 +15,7 @@ use winit::{
     window::{CursorGrabMode,WindowBuilder,Window},
 };
 use camera::{Camera,Keys};
-use terrain::{Mesh, Vertex,build_mesh_lod,build_mesh_lod_edited,water_mesh,lod_at,chunk_key,ordered_neighbours};
+use terrain::{Mesh, Vertex,build_mesh_lod,build_mesh_lod_edited,build_mesh_with_voxels,water_mesh,lod_at,chunk_key,ordered_neighbours};
 
 const RADIUS: i32=3; // up to 49 chunks / ~1.8 km square resident
 const DEFAULT_SEED:u64=42;
@@ -30,7 +30,7 @@ struct Uniforms {
 
 type TerrainJob=(i32,i32,u8,u64);
 type TerrainResult=(i32,i32,u8,u64,Mesh);
-fn spawn_chunk_worker(seed:u64,earth:Arc<RwLock<Earthworks>>)->Result<(Sender<TerrainJob>,Receiver<TerrainResult>),String> {
+fn spawn_chunk_worker(seed:u64,earth:Arc<RwLock<Earthworks>>,voxels:Arc<RwLock<VoxelWorld>>)->Result<(Sender<TerrainJob>,Receiver<TerrainResult>),String> {
     let (job_sender,job_receiver)=mpsc::channel::<TerrainJob>();
     let (result_sender,result_receiver)=mpsc::channel::<TerrainResult>();
     std::thread::Builder::new().name("aion-terrain-builder".into()).spawn(move || {
@@ -38,7 +38,8 @@ fn spawn_chunk_worker(seed:u64,earth:Arc<RwLock<Earthworks>>)->Result<(Sender<Te
         while let Ok((x,z,lod,requested_revision))=job_receiver.recv() {
             let snapshot=earth.read().expect("Earthworks lock poisoned").clone();
             if snapshot.revision!=requested_revision { continue; }
-            let mesh=build_mesh_lod_edited(&world,x,z,lod,Some(&snapshot));
+            let volume=voxels.read().expect("voxel lock poisoned").clone();
+            let mesh=build_mesh_with_voxels(&world,x,z,lod,Some(&snapshot),&volume);
             if result_sender.send((x,z,lod,requested_revision,mesh)).is_err() {break;}
         }
     }).map_err(|e|format!("Impossible de lancer le calcul du terrain : {e}"))?;
@@ -64,6 +65,8 @@ struct Explorer {
     chunks:HashMap<(i32,i32),GpuChunk>,
     pending_chunks:HashMap<(i32,i32),(u8,u64)>,
     earth:Arc<RwLock<Earthworks>>,
+    voxels:Arc<RwLock<VoxelWorld>>,
+    voxel_save_path:PathBuf,
     selected:Material,
     action_status:String,
     save_path:PathBuf,
@@ -173,10 +176,15 @@ impl Explorer {
             Err(msg)=>(Earthworks::new(seed),format!("ERREUR sauvegarde: {msg} (fichier conservé)")),
         };
         let earth=Arc::new(RwLock::new(initial_edits));
-        let (chunk_jobs,chunk_results)=spawn_chunk_worker(seed,earth.clone())?;
+        let voxel_save_path=save_path.with_extension("aionv14");
+        let initial_voxels=if voxel_save_path.exists(){
+            VoxelWorld::load(&world,&voxel_save_path).unwrap_or_else(|_|VoxelWorld::new(seed))
+        }else{VoxelWorld::new(seed)};
+        let voxels=Arc::new(RwLock::new(initial_voxels));
+        let (chunk_jobs,chunk_results)=spawn_chunk_worker(seed,earth.clone(),voxels.clone())?;
         Ok(Self{window,surface,device,queue,config,pipeline,water_pipeline,bind_group,uniform_buffer,
             depth,world,camera,keys:Keys::default(),chunks:HashMap::new(),
-            pending_chunks:HashMap::new(),chunk_jobs,chunk_results,earth,
+            pending_chunks:HashMap::new(),chunk_jobs,chunk_results,earth,voxels,voxel_save_path,
             selected:Material::Soil,action_status:load_status,save_path,cursor_locked:false,
             last_frame:Instant::now(),title_tick:Instant::now(),rendered_frames:0,seed,adapter_name})
     }
@@ -219,16 +227,63 @@ impl Explorer {
             Err(e)=>self.action_status=e,
         }
     }
+    fn voxel_raycast(&self)->Option<aion_world::RayHit>{
+        let p=self.camera.position;
+        let forward=self.camera.forward();
+        self.voxels.read().expect("voxel lock poisoned").raycast(&self.world,
+            [p.x as f64,p.y as f64,p.z as f64],
+            [forward.x as f64,forward.y as f64,forward.z as f64],32.0)
+    }
+    fn dig_voxel(&mut self) {
+        let Some(hit)=self.voxel_raycast()else{
+            self.action_status="Vise un bloc de roche a moins de 32 m".into();return;
+        };
+        let result=self.voxels.write().expect("voxel lock poisoned").dig(&self.world,hit.solid);
+        match result {
+            Ok(material)=>{
+                self.earth.write().expect("earthworks lock poisoned").revision+=1;
+                self.changed_ground((hit.solid.center()[0],hit.solid.center()[2]));
+                self.action_status=format!("Creuse 8 m³ de {} a {:?}",material.name(),hit.solid);
+            },
+            Err(e)=>self.action_status=e,
+        }
+    }
+    fn place_voxel(&mut self) {
+        let Some(hit)=self.voxel_raycast()else{
+            self.action_status="Vise une paroi pour placer un bloc".into();return;
+        };
+        let Some(target)=hit.last_air else{
+            self.action_status="Aucun espace libre entre toi et la roche".into();return;
+        };
+        let result=self.voxels.write().expect("voxel lock poisoned").place(&self.world,target,self.selected);
+        match result {
+            Ok(())=>{
+                self.earth.write().expect("earthworks lock poisoned").revision+=1;
+                self.changed_ground((target.center()[0],target.center()[2]));
+                self.action_status=format!("Place 8 m³ de {} a {:?}",self.selected.name(),target);
+            },
+            Err(e)=>self.action_status=e,
+        }
+    }
     fn save_edits(&mut self) {
         let r=self.earth.read().expect("earthworks lock poisoned").save(&self.save_path);
-        self.action_status=match r {Ok(())=>format!("Terrain enregistré : {}",self.save_path.display()),Err(e)=>format!("ÉCHEC sauvegarde : {e}")};
+        let v=self.voxels.read().expect("voxel lock poisoned").save(&self.voxel_save_path);
+        self.action_status=match (r,v) {
+            (Ok(()),Ok(()))=>format!("Terrain et cavités sauvegardés : {}",self.voxel_save_path.display()),
+            (a,b)=>format!("ERREUR sauvegarde : terrain={a:?}, voxels={b:?}"),
+        };
     }
     fn load_edits(&mut self) {
-        match Earthworks::load(&self.world,&self.save_path) {
-            Ok(e)=>{*self.earth.write().expect("earthworks lock poisoned")=e;
+        let old=Earthworks::load(&self.world,&self.save_path);
+        let volume=VoxelWorld::load(&self.world,&self.voxel_save_path);
+        match (old,volume) {
+            (Ok(e),Ok(v))=>{
+                *self.earth.write().expect("earthworks lock poisoned")=e;
+                *self.voxels.write().expect("voxel lock poisoned")=v;
                 self.chunks.clear();self.pending_chunks.clear();
-                self.action_status="Terrain chargé avec bilan matière vérifié".into();},
-            Err(e)=>self.action_status=format!("ÉCHEC chargement : {e}"),
+                self.action_status="Terrain 2.5D et cavités 3D restaurés, volumes vérifiés".into();
+            },
+            (a,b)=>self.action_status=format!("Sauvegardes non chargées : surface={a:?}, volume={b:?}"),
         }
     }
     fn resize(&mut self,width:u32,height:u32) {
@@ -301,10 +356,11 @@ impl Explorer {
         if now.duration_since(self.title_tick)>=Duration::from_secs(1) {
             let sample=self.world.sample(self.camera.position.x as f64,self.camera.position.z as f64);
             let earth=self.earth.read().expect("earthworks lock poisoned");
-            self.window.set_title(&format!("PRIMORDIA 0.13 | {} FPS | {} zones | {:?} | {} | sélection {} ({:.0} m³, {} kg/m³) | {} | Q creuser E déposer P/L sauvegarder | GPU {}",
+            self.window.set_title(&format!("PRIMORDIA 0.14 | {} FPS | {} zones | {:?} | {} | {} ({:.0} m³ sur sol / {:.0} m³ voxel) | {} cellules 2.5D / {} voxels 3D | Q/E surface B/N cave P/L | GPU {}",
                 self.rendered_frames,self.chunks.len(),sample.biome,self.action_status,
-                self.selected.name(),earth.inventory_volume_m3(self.selected),self.selected.density_kg_m3(),
-                earth.cell_count(),self.adapter_name));
+                self.selected.name(),earth.inventory_volume_m3(self.selected),
+                self.voxels.read().expect("voxel lock poisoned").inventory_units(self.selected) as f64*VOXEL_VOLUME_M3,
+                earth.cell_count(),self.voxels.read().expect("voxel lock poisoned").edited_count(),self.adapter_name));
             self.rendered_frames=0;self.title_tick=now;
         }
     }
@@ -411,6 +467,14 @@ fn self_test()->Result<(),String> {
     if !earth.material_balance_ok(){return Err("Earthworks conservation failed".into());}
     let m=build_mesh_lod_edited(&w,0,0,0,Some(&earth));
     if !m.vertices.iter().all(|v|v.position[1].is_finite()) {return Err("Earthworks mesh nonfinite".into());}
+    let mut voxels=VoxelWorld::new(w.seed);
+    let x=11.0;let z=15.0;let y=((w.elevation_m(x,z)-1.0)/2.0).floor()*2.0+1.0;
+    let key=aion_world::VoxelKey::at(x,y,z).ok_or("Voxel index")?;
+    voxels.dig(&w,key)?;
+    let cave=build_mesh_with_voxels(&w,0,0,0,None,&voxels);
+    if !voxels.material_balance_ok()||cave.indices.iter().any(|&n|n as usize>=cave.vertices.len()){
+        return Err("Volumetric rock mesh invalid".into());
+    }
     Ok(())
 }
 
@@ -443,7 +507,7 @@ fn run()->Result<(),String> {
         .map(|pair|pair[1].parse::<u64>().map_err(|_|"Usage: --seed <u64>".to_string()))
         .transpose()?.unwrap_or(DEFAULT_SEED);
     let event_loop=EventLoop::new().map_err(|e|e.to_string())?;
-    let window=Arc::new(WindowBuilder::new().with_title("PRIMORDIA 0.13 - Matières terrestres")
+    let window=Arc::new(WindowBuilder::new().with_title("PRIMORDIA 0.14 - Sous-sol 3D et galeries")
         .with_inner_size(winit::dpi::LogicalSize::new(1360.,820.))
         .build(&event_loop).map_err(|e|e.to_string())?);
     let mut app=pollster::block_on(Explorer::new(window.clone(),seed))?;
@@ -467,6 +531,8 @@ fn run()->Result<(),String> {
                             KeyCode::Escape=>app.grab(false),
                             KeyCode::KeyF=>app.camera.toggle_flight(),
                             KeyCode::KeyQ=>app.excavate(),
+                            KeyCode::KeyB=>app.dig_voxel(),
+                            KeyCode::KeyN=>app.place_voxel(),
                             KeyCode::KeyE=>app.deposit(),
                             KeyCode::KeyP=>app.save_edits(),
                             KeyCode::KeyL=>app.load_edits(),
