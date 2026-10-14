@@ -3,7 +3,7 @@
 mod camera;
 mod terrain;
 
-use std::{collections::HashMap, sync::Arc, time::{Duration,Instant}};
+use std::{collections::HashMap, sync::{Arc,mpsc::{self,Receiver,Sender}}, time::{Duration,Instant}};
 use aion_world::{World,CHUNK_METRES};
 use bytemuck::{Pod,Zeroable};
 use glam::{Vec3,Mat4};
@@ -28,6 +28,21 @@ struct Uniforms {
     sun: [f32;4],
 }
 
+type TerrainJob=(i32,i32,u8);
+type TerrainResult=(i32,i32,u8,Mesh);
+fn spawn_chunk_worker(seed:u64)->Result<(Sender<TerrainJob>,Receiver<TerrainResult>),String> {
+    let (job_sender,job_receiver)=mpsc::channel::<TerrainJob>();
+    let (result_sender,result_receiver)=mpsc::channel::<TerrainResult>();
+    std::thread::Builder::new().name("aion-terrain-builder".into()).spawn(move || {
+        let world=World::new(seed);
+        while let Ok((x,z,lod))=job_receiver.recv() {
+            let mesh=build_mesh_lod(&world,x,z,lod);
+            if result_sender.send((x,z,lod,mesh)).is_err() {break;}
+        }
+    }).map_err(|e|format!("Impossible de lancer le calcul du terrain : {e}"))?;
+    Ok((job_sender,result_receiver))
+}
+
 struct GpuChunk {
     vertex:wgpu::Buffer, index:wgpu::Buffer, count:u32,
     water_vertex:wgpu::Buffer, water_index:wgpu::Buffer, water_count:u32,
@@ -45,6 +60,9 @@ struct Explorer {
     depth:wgpu::TextureView,
     world:World, camera:Camera, keys:Keys,
     chunks:HashMap<(i32,i32),GpuChunk>,
+    pending_chunks:HashMap<(i32,i32),u8>,
+    chunk_jobs:Sender<TerrainJob>,
+    chunk_results:Receiver<TerrainResult>,
     cursor_locked:bool, last_frame:Instant, title_tick:Instant,
     rendered_frames:u32,
     seed:u64,
@@ -140,8 +158,10 @@ impl Explorer {
         let world=World::new(seed);
         let camera=Camera::new(&world);
         config.width=size.width.max(1);
+        let (chunk_jobs,chunk_results)=spawn_chunk_worker(seed)?;
         Ok(Self{window,surface,device,queue,config,pipeline,water_pipeline,bind_group,uniform_buffer,
-            depth,world,camera,keys:Keys::default(),chunks:HashMap::new(),cursor_locked:false,
+            depth,world,camera,keys:Keys::default(),chunks:HashMap::new(),
+            pending_chunks:HashMap::new(),chunk_jobs,chunk_results,cursor_locked:false,
             last_frame:Instant::now(),title_tick:Instant::now(),rendered_frames:0,seed,adapter_name})
     }
     fn resize(&mut self,width:u32,height:u32) {
@@ -150,8 +170,8 @@ impl Explorer {
         self.surface.configure(&self.device,&self.config);
         self.depth=depth_buffer(&self.device,width,height);
     }
-    fn add_chunk(&mut self,x:i32,z:i32,lod:u8) {
-        let Mesh{vertices,indices}=build_mesh_lod(&self.world,x,z,lod);
+    fn add_chunk(&mut self,x:i32,z:i32,lod:u8,mesh:Mesh) {
+        let Mesh{vertices,indices}=mesh;
         let vertex=self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
             label:Some("Terrain LOD vertices"),contents:bytemuck::cast_slice(&vertices),usage:wgpu::BufferUsages::VERTEX,
         });
@@ -175,11 +195,34 @@ impl Explorer {
         self.camera.update(&self.world,&self.keys,dt);
         let (cx,cz)=chunk_key(self.camera.position.x as f64,self.camera.position.z as f64);
         self.chunks.retain(|&(x,z),_|(x-cx).abs()<=RADIUS && (z-cz).abs()<=RADIUS);
-        // Limit terrain generation to one new chunk per frame to avoid stutters.
-        if let Some((x,z))=ordered_neighbours(cx,cz,RADIUS).into_iter()
-            .find(|&(x,z)|self.chunks.get(&(x,z))
-                .map(|chunk|chunk.lod!=lod_at(x-cx,z-cz)).unwrap_or(true)) {
-            self.add_chunk(x,z,lod_at(x-cx,z-cz));
+        // The heavy mesh generation runs on a background thread; never freeze
+        // the Win32 event loop while sampling 2m terrain or vegetation.
+        for _ in 0..2 {
+            match self.chunk_results.try_recv() {
+                Ok((x,z,lod,mesh)) => {
+                    if self.pending_chunks.get(&(x,z))==Some(&lod) {
+                        self.pending_chunks.remove(&(x,z));
+                    }
+                    if (x-cx).abs()<=RADIUS && (z-cz).abs()<=RADIUS &&
+                        lod_at(x-cx,z-cz)==lod {
+                        self.add_chunk(x,z,lod,mesh);
+                    }
+                },
+                Err(_) => break,
+            }
+        }
+        if self.pending_chunks.len()<8 {
+            if let Some((x,z))=ordered_neighbours(cx,cz,RADIUS).into_iter()
+                .find(|&(x,z)|{
+                    let needed=lod_at(x-cx,z-cz);
+                    self.chunks.get(&(x,z)).map(|v|v.lod!=needed).unwrap_or(true)
+                        && self.pending_chunks.get(&(x,z))!=Some(&needed)
+                }) {
+                let lod=lod_at(x-cx,z-cz);
+                if self.chunk_jobs.send((x,z,lod)).is_ok() {
+                    self.pending_chunks.insert((x,z),lod);
+                }
+            }
         }
         self.rendered_frames+=1;
         if now.duration_since(self.title_tick)>=Duration::from_secs(1) {
