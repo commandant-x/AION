@@ -29,7 +29,9 @@ jobs:
         shell: pwsh
         run: |
           & .\target\release\aion-window.exe --self-test
-          if ($LASTEXITCODE -ne 0) { throw 'Rust solver test failed' }
+          $code = $LASTEXITCODE
+          Get-Content "$env:TEMP\aion-gui-self-test.txt"
+          if ($code -ne 0) { throw 'Rust solver test failed' }
       - name: Native Win32 window and draw smoke test
         shell: pwsh
         run: |
