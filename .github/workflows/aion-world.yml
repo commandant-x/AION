@@ -1,0 +1,46 @@
+name: PRIMORDIA World Model Tests
+on:
+  push:
+    paths:
+      - 'Cargo.toml'
+      - 'crates/aion-world/**'
+      - '.github/workflows/aion-world.yml'
+  pull_request:
+    paths:
+      - 'Cargo.toml'
+      - 'crates/aion-world/**'
+      - '.github/workflows/aion-world.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  world:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test -p aion-world --all-targets
+      - run: cargo build --release -p aion-world --bin aion-world-export
+      - name: Export deterministic OBJ mesh
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then
+            ./target/release/aion-world-export.exe 42 -2 3 terrain.obj
+          else
+            ./target/release/aion-world-export 42 -2 3 terrain.obj
+          fi
+          test -s terrain.obj
+          grep -q '^f ' terrain.obj
+      - name: Upload Windows exporter and mesh
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: AION-WORLD-EXPORTER-WIN64
+          path: |
+            target/release/aion-world-export.exe
+            terrain.obj
+          if-no-files-found: error
