@@ -3,6 +3,8 @@
 
 pub mod earthworks;
 pub mod voxels;
+pub mod hydrothermal;
+pub use hydrothermal::{HydroThermal,HydroMaterial,HydroCell,HydroReport,WATER_DENSITY_KG_M3,WATER_HEAT_J_KG_K};
 pub use voxels::{VoxelWorld,VoxelKey,CellEdit,RayHit,VOXEL_VOLUME_M3};
 pub use earthworks::{Earthworks,Material,material_at};
 
