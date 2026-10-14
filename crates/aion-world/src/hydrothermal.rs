@@ -89,6 +89,15 @@ impl HydroCell {
     }
 }
 
+
+#[derive(Clone,Copy,Debug,Default,PartialEq)]
+pub struct HydroRemap {
+    pub changed_cells:usize,
+    pub drained_m3:f64,
+    pub rock_heat_in_j:f64,
+    pub rock_heat_out_j:f64,
+}
+
 #[derive(Clone,Copy,Debug)]
 pub struct HydroReport {
     pub time_s:f64,pub total_water_m3:f64,pub injected_water_m3:f64,
@@ -162,6 +171,90 @@ impl HydroThermal {
         cell.water_m3-=actual;cell.energy_j-=energy;
         self.withdrawn_water_m3+=actual;self.energy_out_j+=energy;
         Ok(actual)
+    }
+
+    /// Reconcile a changed 3D rock mesh with the local water/heat field.
+    /// Rock removal/addition is an OPEN SYSTEM: exported/imported sensible heat
+    /// is explicitly accounted for. Excess water from infilled cavities leaves
+    /// the patch as a measured external withdrawal; it is never silently lost.
+    /// This is a local remapping proxy, not a full two-phase pore flow model.
+    pub fn reconcile_voxels(&mut self,world:&World,voxels:&VoxelWorld)->Result<HydroRemap,String>{
+        if world.seed!=self.seed || voxels.seed!=self.seed{
+            return Err("Hydrothermal voxel world seed mismatch".into());
+        }
+        let mut next=self.clone(); // Validate atomically: failure leaves state unchanged.
+        let mut report=HydroRemap::default();
+        for i in 0..next.cells.len(){
+            let key=next.cells[i].key;
+            let new_mat=voxels.material(world,key);
+            if new_mat==next.cells[i].material {continue;}
+            let new_properties=HydroMaterial::from_material(new_mat);
+            if !new_properties.validate(){return Err("Invalid new material coefficients".into());}
+            let excess=(next.cells[i].water_m3-new_properties.porosity*VOXEL_VOLUME_M3).max(0.0);
+            if excess>0.0 {
+                // Withdraw before changing pore geometry, preserving the water's
+                // current temperature in the exported advective enthalpy.
+                let drained=next.withdraw(i,excess)?;
+                report.drained_m3+=drained;
+            }
+            let temp=next.cells[i].temperature_k();
+            let previous_energy=next.cells[i].energy_j;
+            next.cells[i].material=new_mat;
+            next.cells[i].properties=new_properties;
+            let new_energy=next.cells[i].heat_capacity_j_k()*temp;
+            if !new_energy.is_finite() || new_energy<=0.0 {
+                return Err("Invalid rock replacement enthalpy".into());
+            }
+            next.cells[i].energy_j=new_energy;
+            let change=new_energy-previous_energy;
+            if change>=0.0 {next.energy_in_j+=change;report.rock_heat_in_j+=change;}
+            else{next.energy_out_j-=change;report.rock_heat_out_j-=change;}
+            report.changed_cells+=1;
+        }
+        let mw=next.mass_residual_m3();
+        let ej=next.energy_residual_j();
+        if !next.cells.iter().all(HydroCell::valid) || mw.abs()>1.0e-8*(1.0+next.initial_water_m3)
+            || ej.abs()>1.0e-8*(1.0+next.initial_energy_j.abs()){
+            return Err("Hydrothermal remap would violate water/energy budgets".into());
+        }
+        *self=next;
+        Ok(report)
+    }
+    /// Controlled demonstration: mine a native rock voxel, flood the newly
+    /// accessible pore volume, remap back to rock with explicit drainage.
+    pub fn write_coupling_benchmark(path:&Path,seed:u64)->Result<(),String>{
+        let world=World::new(seed);let mut voxels=VoxelWorld::new(seed);
+        let height=world.elevation_m(0.0,0.0);
+        let key=VoxelKey::at(0.0,height-14.0,0.0).ok_or("Invalid geological sample")?;
+        if voxels.material(&world,key).is_none(){return Err("Benchmark rock voxel missing".into());}
+        let origin=key.neighbour([-1,-1,-1]).ok_or("Patch origin overflow")?;
+        let mut sim=Self::from_voxels(&world,&voxels,origin,[3,3,3])?;
+        let selected=sim.index(1,1,1).ok_or("Missing coupling cell")?;
+        let mut csv=String::from("step,time_s,water_m3,cave_cells,withdrawn_m3,water_residual_m3,energy_residual_j,changed_cells,drained_m3,fingerprint\n");
+        let mut extracted=None;
+        for step in 0..=60 {
+            let mut remap=HydroRemap::default();
+            if step==1 {
+                extracted=Some(voxels.dig(&world,key)?);
+                remap=sim.reconcile_voxels(&world,&voxels)?;
+            }
+            if step==2 {
+                let accepted=sim.inject(selected,3.0,290.15)?;
+                if accepted<2.99 {return Err("Excavated cavity did not accept water".into());}
+            }
+            if step==31 {
+                voxels.place(&world,key,extracted.ok_or("Missing extracted rock")?)?;
+                remap=sim.reconcile_voxels(&world,&voxels)?;
+                if remap.drained_m3<=0.0 {return Err("Expected excess fluid drainage".into());}
+            }
+            if step>0 {sim.step(10.0)?;}
+            let r=sim.report();
+            let cave_cells=sim.cells.iter().filter(|c|c.material.is_none()).count();
+            csv.push_str(&format!("{step},{:.1},{:.12},{cave_cells},{:.12},{:.12},{:.6},{},{:.12},{:016x}\n",
+                r.time_s,r.total_water_m3,r.withdrawn_water_m3,sim.mass_residual_m3(),
+                sim.energy_residual_j(),remap.changed_cells,remap.drained_m3,r.fingerprint));
+        }
+        std::fs::write(path,csv).map_err(|e|e.to_string())
     }
     pub fn step(&mut self,dt:f64)->Result<(),String>{
         if !dt.is_finite()||dt<=0.0||dt>60.0{return Err("Hydrology dt must be (0,60] s".into())}
@@ -308,6 +401,65 @@ fn transport(donor:&mut HydroCell,recipient:&mut HydroCell,requested_m3:f64){
         let w=World::new(seed);let v=VoxelWorld::new(seed);
         HydroThermal::from_voxels(&w,&v,VoxelKey::at(0.,-24.,0.).unwrap(),[4,4,4]).unwrap()
     }
+
+    #[test] fn mine_keeps_water_and_exports_rock_heat(){
+        let world=World::new(47);let mut voxels=VoxelWorld::new(47);
+        let k=VoxelKey::at(0.0,world.elevation_m(0.0,0.0)-15.0,0.0).unwrap();
+        let o=k.neighbour([-1,-1,-1]).unwrap();
+        let mut s=HydroThermal::from_voxels(&world,&voxels,o,[3,3,3]).unwrap();
+        let i=s.index(1,1,1).unwrap();let before=s.water_m3();let t=s.cells[i].temperature_k();
+        voxels.dig(&world,k).unwrap();
+        let report=s.reconcile_voxels(&world,&voxels).unwrap();
+        assert_eq!(report.changed_cells,1);
+        assert_eq!(s.cells[i].material,None);
+        assert_eq!(s.cells[i].capacity_m3(),VOXEL_VOLUME_M3);
+        assert!((s.water_m3()-before).abs()<1e-10);
+        assert!((s.cells[i].temperature_k()-t).abs()<1e-10);
+        assert!(report.rock_heat_out_j>0.0);
+        assert!(s.mass_residual_m3().abs()<1e-10);
+        assert!(s.energy_residual_j().abs()<1e-4);
+    }
+    #[test] fn refill_cavity_drains_excess_water_without_deleting_mass(){
+        let world=World::new(48);let mut voxels=VoxelWorld::new(48);
+        let k=VoxelKey::at(0.0,world.elevation_m(0.0,0.0)-15.0,0.0).unwrap();
+        let o=k.neighbour([-1,-1,-1]).unwrap();
+        let mut s=HydroThermal::from_voxels(&world,&voxels,o,[3,3,3]).unwrap();
+        let i=s.index(1,1,1).unwrap();
+        let m=voxels.dig(&world,k).unwrap();s.reconcile_voxels(&world,&voxels).unwrap();
+        s.inject(i,4.0,288.0).unwrap();
+        let before=s.water_m3();
+        voxels.place(&world,k,m).unwrap();
+        let remap=s.reconcile_voxels(&world,&voxels).unwrap();
+        assert_eq!(remap.changed_cells,1);
+        assert!(remap.drained_m3>1.0);
+        assert!((s.water_m3()+remap.drained_m3-before).abs()<1e-10);
+        assert!(s.mass_residual_m3().abs()<1e-10);
+        assert!(s.energy_residual_j().abs()<1e-3);
+        assert_eq!(s.cells[i].material,Some(m));
+    }
+    #[test] fn identical_geology_is_a_noop_and_wrong_seed_is_atomic(){
+        let w=World::new(21);let v=VoxelWorld::new(21);
+        let mut s=HydroThermal::from_voxels(&w,&v,VoxelKey::at(0.0,-16.0,0.0).unwrap(),[2,2,2]).unwrap();
+        let before=s.fingerprint();let e=s.energy_j();
+        assert_eq!(s.reconcile_voxels(&w,&v).unwrap(),HydroRemap::default());
+        assert_eq!(s.fingerprint(),before);assert_eq!(s.energy_j(),e);
+        assert!(s.reconcile_voxels(&World::new(22),&v).is_err());
+        assert_eq!(s.fingerprint(),before);
+    }
+    #[test] fn post_remap_save_and_replay_keep_budgets(){
+        let w=World::new(13);let mut v=VoxelWorld::new(13);
+        let k=VoxelKey::at(0.0,w.elevation_m(0.0,0.0)-15.0,0.0).unwrap();
+        let mut s=HydroThermal::from_voxels(&w,&v,k.neighbour([-1,-1,-1]).unwrap(),[3,3,3]).unwrap();
+        v.dig(&w,k).unwrap();s.reconcile_voxels(&w,&v).unwrap();
+        for _ in 0..3{s.step(10.0).unwrap();}
+        let p=std::env::temp_dir().join(format!("aion-016-{}-{}.bin",std::process::id(),w.seed));
+        s.save(&p).unwrap();let restored=HydroThermal::load(&p,&w,&v).unwrap();
+        std::fs::remove_file(p).unwrap();
+        assert_eq!(restored.fingerprint(),s.fingerprint());
+        assert!(restored.mass_residual_m3().abs()<1e-9);
+        assert!(restored.energy_residual_j().abs()<1e-3);
+    }
+
     #[test] fn parameters_are_positive_and_rocks_differ(){
         for m in Material::ALL {assert!(HydroMaterial::from_material(Some(m)).validate());}
         assert!(HydroMaterial::from_material(Some(Material::Gravel)).conductivity_m_s>
