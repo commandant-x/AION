@@ -6,6 +6,8 @@ on:
       - 'crates/aion-world/**'
       - 'crates/aion-explore/**'
       - '.github/workflows/aion-gpu-explorer.yml'
+      - 'tests/validate_hydro_015.py'
+      - 'tests/validate_hydro_015.py'
   pull_request:
     paths:
       - 'Cargo.toml'
@@ -40,6 +42,18 @@ jobs:
           else
             ./target/release/aion-explore --self-test
           fi
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Conservative hydrothermal benchmark (61 observations)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then
+            ./target/release/aion-explore.exe --hydro-benchmark hydro-015.csv
+          else
+            ./target/release/aion-explore --hydro-benchmark hydro-015.csv
+          fi
+          python tests/validate_hydro_015.py hydro-015.csv
       - name: Native Win32 window smoke test
         if: runner.os == 'Windows'
         shell: pwsh
@@ -51,5 +65,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: PRIMORDIA-GPU-EXPLORER-WIN64
-          path: target/release/aion-explore.exe
+          path: |
+            target/release/aion-explore.exe
+            hydro-015.csv
+            crates/aion-world/src/hydrothermal.rs
+            crates/aion-explore/MODEL_015.md
+            tests/validate_hydro_015.py
           if-no-files-found: error

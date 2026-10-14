@@ -4,7 +4,7 @@ mod camera;
 mod terrain;
 
 use std::{collections::HashMap, path::PathBuf, sync::{Arc,RwLock,mpsc::{self,Receiver,Sender}}, time::{Duration,Instant}};
-use aion_world::{World,Earthworks,Material,VoxelWorld,VOXEL_VOLUME_M3,CHUNK_METRES};
+use aion_world::{World,Earthworks,Material,VoxelWorld,HydroThermal,VOXEL_VOLUME_M3,CHUNK_METRES};
 use bytemuck::{Pod,Zeroable};
 use glam::{Vec3,Mat4};
 use wgpu::util::DeviceExt;
@@ -475,6 +475,13 @@ fn self_test()->Result<(),String> {
     if !voxels.material_balance_ok()||cave.indices.iter().any(|&n|n as usize>=cave.vertices.len()){
         return Err("Volumetric rock mesh invalid".into());
     }
+    let origin=aion_world::VoxelKey::at(0.0,-24.0,0.0).ok_or("Invalid hydro origin")?;
+    let mut hydro=HydroThermal::from_voxels(&w,&voxels,origin,[3,3,3])?;
+    let first=hydro.water_m3();
+    hydro.inject(4,0.02,290.15)?;
+    hydro.step(20.0)?;
+    if !hydro.mass_residual_m3().is_finite()||hydro.mass_residual_m3().abs()>1e-8 ||
+       hydro.water_m3()<first{return Err("Hydrothermal mass budget failed".into())}
     Ok(())
 }
 
@@ -494,6 +501,13 @@ fn main() {
 fn run()->Result<(),String> {
     let args:Vec<String>=std::env::args().collect();
     if args.iter().any(|x|x=="--self-test") {return self_test();}
+    if let Some(pos)=args.iter().position(|x|x=="--hydro-benchmark") {
+        let file=args.get(pos+1).ok_or("Usage: --hydro-benchmark <output.csv> [--seed N]")?;
+        let seed=args.windows(2).find(|pair|pair[0]=="--seed")
+            .map(|pair|pair[1].parse::<u64>().map_err(|_|"Usage: --seed <u64>".to_string()))
+            .transpose()?.unwrap_or(DEFAULT_SEED);
+        return HydroThermal::write_benchmark(std::path::Path::new(file),seed);
+    }
     if args.iter().any(|x|x=="--window-smoke") {
         // Real native window creation, but no GPU adapter required on CI runners.
         let loop_=EventLoop::new().map_err(|e|e.to_string())?;
@@ -507,7 +521,7 @@ fn run()->Result<(),String> {
         .map(|pair|pair[1].parse::<u64>().map_err(|_|"Usage: --seed <u64>".to_string()))
         .transpose()?.unwrap_or(DEFAULT_SEED);
     let event_loop=EventLoop::new().map_err(|e|e.to_string())?;
-    let window=Arc::new(WindowBuilder::new().with_title("PRIMORDIA 0.14 - Sous-sol 3D et galeries")
+    let window=Arc::new(WindowBuilder::new().with_title("PRIMORDIA 0.15 - Hydrothermique conservatif + sous-sol 3D")
         .with_inner_size(winit::dpi::LogicalSize::new(1360.,820.))
         .build(&event_loop).map_err(|e|e.to_string())?);
     let mut app=pollster::block_on(Explorer::new(window.clone(),seed))?;
