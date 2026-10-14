@@ -1,3 +1,20 @@
+# PRIMORDIA 0.15 — Physique hydrothermique vérifiable
+
+La priorité scientifique prend le pas sur l'ajout de fonctionnalités de jeu. Un nouveau sous-système **Rust à volumes finis** représente l'eau et les transferts thermiques au sein d'un petit volume de roche géologique. Chacune de ses cellules (2 × 2 × 2 m) porte une quantité d'eau [m³], une énergie sensible [J], une température [K], ainsi que des caractéristiques de porosité, conductivité hydraulique, succion et propriétés thermiques.
+
+Les transferts sur les faces utilisent une fermeture **approchée** de Darcy et la conduction de Fourier. Les volumes et flux d'énergie sont transférés symétriquement entre cellules pour éviter la création ou destruction artificielle d'eau ou de chaleur. Les limites externes du laboratoire sont fermées, avec apports d'eau comptabilisés séparément. Des expériences indépendantes comparant argile et gravier, conduction, gravité et rejeu déterministe sont incluses.
+
+**Essai numérique sans interface graphique** :
+```powershell
+.\aion-explore.exe --hydro-benchmark bilan.csv
+python tests/validate_hydro_015.py bilan.csv
+```
+Le premier exécutable Windows demeure aussi un explorateur GPU lorsqu'il est ouvert normalement. La nouvelle expérience produit **61 états successifs** avec conservation, apports, températures et empreintes déterministes. Voir [documentation du modèle](crates/aion-explore/MODEL_015.md) et [tests officiels](https://github.com/commandant-x/AION/actions/workflows/aion-gpu-explorer.yml).
+
+**Niveau de fidélité actuel : laboratoire numérique expérimental.** La roche est une classe synthétique non calibrée, le débit hydraulique en régime non saturé utilise une approximation linéaire de la succion, la chaleur latente et les réactions chimiques ne sont pas modélisées. Ce laboratoire ne met pas encore à jour l'ensemble de la planète ni la physique des creusements en temps réel. Aucune prétention à un modèle de nappe ou d'aquifère validé sur le terrain.
+
+---
+
 # PRIMORDIA 0.14 — Excavation volumique et premières cavités 3D
 
 La version 0.14 contient un système de cellules volumétriques éparses de **2 × 2 × 2 m**, indépendantes des couches de surface. B permet de creuser **8 m³** de sol ou roche devant le joueur ; N permet de déposer un bloc de la matière sélectionnée dans l'espace libre adjacent. Les faces de cavité sont désormais rendues dans le maillage GPU et les blocs de surface retirés ouvrent le terrain.
