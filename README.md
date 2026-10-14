@@ -1,3 +1,15 @@
+# PRIMORDIA 0.16 — Couplage expérimental géologie ↔ eau souterraine
+
+**Nouveauté du moteur Rust** : après creusement d'un voxel, le modèle hydrothermique peut recalculer le volume d'eau disponible dans la cavité. Si celle-ci est rebouchée, l'excédent d'eau est exporté et comptabilisé. L'énergie sensible associée à l'entrée et à la sortie de roche est également suivie. L'opération est transactionnelle et validée avec un benchmark de 61 observations.
+
+**Tester sous Windows** : `aion-explore.exe --hydro-coupling hydro-coupling-016.csv`. Le programme crée un fichier CSV avec les bilans. Il reste également lançable normalement comme explorateur GPU.
+
+**Validation Windows/Linux** : [GitHub Actions](https://github.com/commandant-x/AION/actions/workflows/aion-gpu-explorer.yml), `tests/validate_coupling_016.py`, `crates/aion-explore/MODEL_016.md`.
+
+**Limites majeures** : cette simulation hydrologique demeure un laboratoire numérique local ; elle **n'est pas encore exécutée à chaque excavation dans le jeu**. Le drainage comptabilisé sort du domaine de calcul et n'est pas encore montré visuellement. Le Goal final est toujours ouvert.
+
+---
+
 # PRIMORDIA 0.15 — Physique hydrothermique vérifiable
 
 La priorité scientifique prend le pas sur l'ajout de fonctionnalités de jeu. Un nouveau sous-système **Rust à volumes finis** représente l'eau et les transferts thermiques au sein d'un petit volume de roche géologique. Chacune de ses cellules (2 × 2 × 2 m) porte une quantité d'eau [m³], une énergie sensible [J], une température [K], ainsi que des caractéristiques de porosité, conductivité hydraulique, succion et propriétés thermiques.
