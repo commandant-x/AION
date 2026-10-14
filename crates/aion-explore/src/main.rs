@@ -500,6 +500,14 @@ fn main() {
 }
 fn run()->Result<(),String> {
     let args:Vec<String>=std::env::args().collect();
+    if let Some(i)=args.iter().position(|a|a=="--hydro-coupling") {
+        let output=args.get(i+1).ok_or("Usage: --hydro-coupling <csv>".to_string())?;
+        let seed=args.windows(2).find(|p|p[0]=="--seed")
+            .map(|p|p[1].parse::<u64>().map_err(|_|"Invalid seed".to_string()))
+            .transpose()?.unwrap_or(DEFAULT_SEED);
+        return aion_world::HydroThermal::write_coupling_benchmark(
+            std::path::Path::new(output),seed);
+    }
     if args.iter().any(|x|x=="--self-test") {return self_test();}
     if let Some(pos)=args.iter().position(|x|x=="--hydro-benchmark") {
         let file=args.get(pos+1).ok_or("Usage: --hydro-benchmark <output.csv> [--seed N]")?;
