@@ -45,7 +45,7 @@ pub fn candidate_pairs(particles: &[Particle]) -> Vec<(usize, usize)> {
     #[test] fn broadphase_does_not_miss_overlapping_pairs() {
         let mut ps = Vec::new();
         for a in 0..6 {for b in 0..6 {for c in 0..3 {
-            ps.push(Particle::sphere(Vec3::new(a as f64 * .13 - .4, b as f64 * .17, c as f64 * .22), .085, STONE, 300.0));
+            ps.push(Particle::sphere(Vec3::new(a as f64 * 0.13 - 0.4, b as f64 * 0.17, c as f64 * 0.22), 0.085, STONE, 300.0));
         }}}
         let pairs = candidate_pairs(&ps);
         for i in 0..ps.len() { for j in (i+1)..ps.len() {
@@ -56,7 +56,7 @@ pub fn candidate_pairs(particles: &[Particle]) -> Vec<(usize, usize)> {
         assert!(pairs.len() < ps.len()*(ps.len()-1)/2);
     }
     #[test] fn pairs_are_unique_and_stable() {
-        let ps = (0..100).map(|i| Particle::sphere(Vec3::new(i as f64 * .07,0.,0.), .05, STONE, 290.)).collect::<Vec<_>>();
+        let ps = (0..100).map(|i| Particle::sphere(Vec3::new(i as f64 * 0.07,0.,0.), 0.05, STONE, 290.)).collect::<Vec<_>>();
         let a=candidate_pairs(&ps);
         assert_eq!(a, candidate_pairs(&ps));
         assert!(a.windows(2).all(|p|p[0]<p[1]));

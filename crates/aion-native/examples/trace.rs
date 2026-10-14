@@ -5,7 +5,7 @@ fn main() {
     for tick in 0..3000 {
         world.step(0.003);
         if tick % 500 == 0 {
-            println!("t={:.3}s particles={} broken={} contacts={} mass={:.3}kg total={:.1}J",
+            println!("t={:0.3}s particles={} broken={} contacts={} mass={:0.3}kg total={:0.1}J",
                 world.state().sim_time,world.state().node_count,
                 world.state().fractures,world.state().contacts,
                 world.mass(),world.total_energy());

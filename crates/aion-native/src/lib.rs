@@ -82,7 +82,7 @@ impl Simulator {
     }
     #[test]fn replay_is_bitwise_stable() {
         let mut a=Simulator::new(0);let mut b=Simulator::new(0);
-        for _ in 0..2000 {a.step(.003);b.step(.003)}
+        for _ in 0..2000 {a.step(0.003);b.step(0.003)}
         assert_eq!(a.checksum(),b.checksum());
         assert!(a.state().fractures>0);
     }
@@ -92,7 +92,7 @@ impl Simulator {
         let energy=s.total_energy();s.heat_sample();
         assert!(s.total_energy()>energy);
         s.pull();
-        s.step(.003);
+        s.step(0.003);
         assert!(s.checksum()!=0);
     }
 }

@@ -15,11 +15,11 @@ fn benchmark_csv() -> String {
                 if step!=0 {
                     if protocol != 0 && step % 180 == 0 { sim.pull(); }
                     if protocol == 2 && step % 250 == 0 { sim.heat(); }
-                    sim.step(.003);
+                    sim.step(0.003);
                 }
                 if step % 100 == 0 {
                     out.push_str(&format!(
-                        "{material},{protocol},{step},{:.6},{:.6},{},{},{},{:.6},{:.6},{:.6},{:.6},{:016x}\n",
+                        "{material},{protocol},{step},{:0.6},{:0.6},{},{},{},{:0.6},{:0.6},{:0.6},{:0.6},{:016x}\n",
                         sim.sim_time,sim.mass(),sim.alive_bonds(),sim.fractures,
                         sim.plastic_events,sim.thermal_energy(),sim.mechanical_energy(),
                         sim.max_plastic_strain(),sim.max_damage,sim.checksum()
@@ -38,15 +38,15 @@ fn main() {
         Some("--self-test") => {
             let mut a=AionSim::laboratory(1);
             let starting_mass=a.mass();
-            for _ in 0..350 {a.step(.003)}
+            for _ in 0..350 {a.step(0.003)}
             let checkpoint=a.encode_v7().expect("canonical checkpoint must encode");
             let mut b=AionSim::decode_v7(&checkpoint).expect("canonical checkpoint must decode");
             assert_eq!(b.encode_v7().unwrap(),checkpoint);
             assert_eq!(a.checksum(),b.checksum());
             assert_eq!(a.mass(),starting_mass);
-            for _ in 0..300 {a.step(.003);b.step(.003)}
+            for _ in 0..300 {a.step(0.003);b.step(0.003)}
             assert_eq!(a.checksum(),b.checksum());
-            println!("AION Rust physics self-test PASS / nodes={} bonds={} / t={:.3}s / checkpoint={} bytes",a.node_count,a.edge_count,a.sim_time,checkpoint.len());
+            println!("AION Rust physics self-test PASS / nodes={} bonds={} / t={:0.3}s / checkpoint={} bytes",a.node_count,a.edge_count,a.sim_time,checkpoint.len());
         }
         Some("--benchmark") if args.len() == 3 => {
             let csv=benchmark_csv();
@@ -55,7 +55,7 @@ fn main() {
         }
         Some("--save") if args.len() == 3 => {
             let mut world=AionSim::laboratory(0);
-            for _ in 0..1000 {world.step(.003)}
+            for _ in 0..1000 {world.step(0.003)}
             let blob=world.encode_v7().expect("world must serialize");
             fs::write(&args[2],&blob).expect("checkpoint write failed");
             println!("Saved {} bytes of AION7 portable state",blob.len());
@@ -63,8 +63,8 @@ fn main() {
         Some("--resume") if args.len() == 3 => {
             let bytes=fs::read(&args[2]).expect("checkpoint read failed");
             let mut world=AionSim::decode_v7(&bytes).expect("invalid or incompatible checkpoint");
-            for _ in 0..1000 {world.step(.003)}
-            println!("Resumed Rust world to t={:.3}s / checksum={:016x}",world.sim_time,world.checksum());
+            for _ in 0..1000 {world.step(0.003)}
+            println!("Resumed Rust world to t={:0.3}s / checksum={:016x}",world.sim_time,world.checksum());
         }
         _ => {
             eprintln!("AION Rust headless: --self-test | --benchmark <file.csv> | --save <file.aion7> | --resume <file.aion7>");

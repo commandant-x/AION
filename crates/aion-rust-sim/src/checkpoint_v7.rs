@@ -38,16 +38,16 @@ fn valid(s: &AionSim) -> bool {
     if s.material_mode < 0 || s.material_mode > 2 || !(0..=1).contains(&s.floor_enabled) { return false }
     if [s.fractures,s.contacts,s.rejected_steps,s.plastic_events,s.fatigue_fractures].iter().any(|x| *x < 0) { return false }
     let scalars = [s.sim_time,s.gravity,s.max_strain,s.max_contact_impulse,s.plastic_heat,s.damage_heat,s.damping_heat,s.max_damage];
-    if scalars.iter().any(|x| (!x.is_finite() || x.abs() >= 1.e300)) || s.sim_time < 0. || s.max_damage > 1. ||
+    if scalars.iter().any(|x| (!x.is_finite() || x.abs() >= 1.0e300)) || s.sim_time < 0. || s.max_damage > 1. ||
        [s.max_strain,s.max_contact_impulse,s.plastic_heat,s.damage_heat,s.damping_heat,s.max_damage].iter().any(|x| *x < 0.) { return false }
     for p in s.nodes.iter().take(n as usize) {
         let vals=[p.p.x,p.p.y,p.p.z,p.v.x,p.v.y,p.v.z,p.r,p.m,p.t,p.cv];
-        if vals.iter().any(|v| (!v.is_finite() || v.abs() >= 1.e300)) || p.r <= 0. || p.m <= 0. || p.t < 0. || p.cv <= 0. ||
+        if vals.iter().any(|v| (!v.is_finite() || v.abs() >= 1.0e300)) || p.r <= 0. || p.m <= 0. || p.t < 0. || p.cv <= 0. ||
            p.component < 0 || p.component >= n || !(0..=3).contains(&p.kind) { return false }
     }
     for b in s.edges.iter().take(e as usize) {
         let vals=[b.rest,b.k,b.limit,b.conductance,b.original_rest,b.yield_strain,b.plastic_rate,b.damage,b.damage_onset,b.damage_rate,b.dashpot];
-        if vals.iter().any(|v| (!v.is_finite() || v.abs() >= 1.e300)) || b.a < 0 || b.a >= n || b.b < 0 || b.b >= n || b.a == b.b || !(0..=1).contains(&b.alive) { return false }
+        if vals.iter().any(|v| (!v.is_finite() || v.abs() >= 1.0e300)) || b.a < 0 || b.a >= n || b.b < 0 || b.b >= n || b.a == b.b || !(0..=1).contains(&b.alive) { return false }
         if b.rest <= 0. || b.original_rest <= 0. || b.damage > 1. || vals.iter().skip(1).any(|v| *v < 0.) { return false }
     }
     true
@@ -129,7 +129,7 @@ mod tests {
     #[test]
     fn rust_codec_roundtrip_and_rejects_damage() {
         let mut world = AionSim::laboratory(2);
-        for _ in 0..200 { world.step(.003); }
+        for _ in 0..200 { world.step(0.003); }
         let mut bytes=world.encode_v7().expect("valid physical state");
         let loaded=AionSim::decode_v7(&bytes).unwrap();
         assert_eq!(loaded.encode_v7().unwrap(),bytes);

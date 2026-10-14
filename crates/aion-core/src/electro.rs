@@ -42,12 +42,12 @@ impl ElectroSystem {
 #[cfg(test)]mod tests {
     use super::*;
     fn pair(q1:f64,q2:f64)->ElectroSystem{
-        let mut e=ElectroSystem::new(.05);
-        e.add(Charge{position:Vec3::new(-.5,0.,0.),velocity:Vec3::ZERO,mass:.01,q:q1});
-        e.add(Charge{position:Vec3::new(.5,0.,0.),velocity:Vec3::ZERO,mass:.01,q:q2});e
+        let mut e=ElectroSystem::new(0.05);
+        e.add(Charge{position:Vec3::new(-0.5,0.,0.),velocity:Vec3::ZERO,mass:0.01,q:q1});
+        e.add(Charge{position:Vec3::new(0.5,0.,0.),velocity:Vec3::ZERO,mass:0.01,q:q2});e
     }
-    #[test]fn like_charges_repulse(){let mut e=pair(1e-6,1e-6);e.step(.001);assert!(e.particles[0].velocity.x<0.);assert!(e.particles[1].velocity.x>0.);}
-    #[test]fn opposite_charges_attract(){let mut e=pair(1e-6,-1e-6);e.step(.001);assert!(e.particles[0].velocity.x>0.);assert!(e.particles[1].velocity.x<0.);}
-    #[test]fn equal_opposite_forces(){let mut e=pair(1e-6,-2e-6);let p=e.momentum();for _ in 0..100{e.step(.0001);}assert!((e.momentum()-p).norm()<1e-12);}
-    #[test]fn verlet_energy_approximately_constant(){let mut e=pair(1e-6,1e-6);let start=e.total_energy();for _ in 0..1000{e.step(.0001);}assert!((e.total_energy()-start).abs()<1e-4);}
+    #[test]fn like_charges_repulse(){let mut e=pair(1e-6,1e-6);e.step(0.001);assert!(e.particles[0].velocity.x<0.);assert!(e.particles[1].velocity.x>0.);}
+    #[test]fn opposite_charges_attract(){let mut e=pair(1e-6,-1e-6);e.step(0.001);assert!(e.particles[0].velocity.x>0.);assert!(e.particles[1].velocity.x<0.);}
+    #[test]fn equal_opposite_forces(){let mut e=pair(1e-6,-2e-6);let p=e.momentum();for _ in 0..100{e.step(0.0001);}assert!((e.momentum()-p).norm()<1e-12);}
+    #[test]fn verlet_energy_approximately_constant(){let mut e=pair(1e-6,1e-6);let start=e.total_energy();for _ in 0..1000{e.step(0.0001);}assert!((e.total_energy()-start).abs()<1e-4);}
 }

@@ -12,7 +12,7 @@ pub struct LatticeSpec {
 }
 impl LatticeSpec {
     pub fn experimental_block()->Self {Self {
-        nx:5,ny:4,nz:3,pitch:.22,particle_radius:.065,
+        nx:5,ny:4,nz:3,pitch:0.22,particle_radius:0.065,
         stiffness:900., break_force:55., heat_conductance:1.8, diagonals:true,
     }}
     pub fn validate(&self)->Result<(),&'static str> {
@@ -68,11 +68,11 @@ pub fn add_lattice(world:&mut World, spec:LatticeSpec, origin:Vec3, material:Mat
     #[test]fn no_hidden_recipes_or_added_mass(){
         let mut w=World::new();let s=LatticeSpec::experimental_block();
         add_lattice(&mut w,s,Vec3::new(0.,2.,0.),STONE,300.).unwrap();
-        let mass=w.total_mass();w.step(.01);assert_eq!(mass,w.total_mass());
+        let mass=w.total_mass();w.step(0.01);assert_eq!(mass,w.total_mass());
         assert!(w.bonds.iter().all(|b|b.a!=b.b));
     }
     #[test]fn rejects_invalid_geometry(){
-        let mut w=World::new();let mut s=LatticeSpec::experimental_block();s.pitch=.1;
+        let mut w=World::new();let mut s=LatticeSpec::experimental_block();s.pitch=0.1;
         assert!(add_lattice(&mut w,s,Vec3::ZERO,STONE,300.).is_err());
         assert_eq!(w.particles.len(),0);
     }
