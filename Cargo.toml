@@ -1,0 +1,8 @@
+[workspace]
+members = ["crates/aion-core", "crates/aion-lab", "crates/aion-native", "crates/aion-rust-sim"]
+resolver = "2"
+
+[workspace.package]
+version = "0.9.0"
+edition = "2021"
+license = "MIT"

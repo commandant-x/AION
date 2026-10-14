@@ -1,0 +1,32 @@
+AION CORE 0.3 — Validation environment: Linux x86_64
+====================================================
+
+NATIVE PORTABLE CORE
+  gcc -O2 tests/test_sim.c native/aion_sim.c -lm
+  RESULT: PASS, 99 assertions, 10000 deterministic steps.
+
+STRESS / SANITIZERS
+  tests/stress.c : 3 material profiles x 15000 steps PASS.
+  clang AddressSanitizer+UBSan: 99 assertions PASS.
+  clang UBSan on stress: PASS.
+
+WINDOWS SELF-TEST LOGIC
+  gcc -O2 -DAION_TEST_HOST windows_viewer/windows_selftest.c native/aion_sim.c -lm
+  RESULT: PASS (host Linux; not a Windows run).
+
+REFERENCE SCIENCE
+  python3 -m pytest reference/test_reference.py -q
+  RESULT: 8 passed.
+
+CROSS-BUILD WINDOWS
+  clang --target=x86_64-pc-windows-msvc and lld-link
+  RESULTS: AION_CORE_0_3.exe is Windows PE32+ GUI x86-64.
+           AION_CORE_0_3_TEST.exe is Windows PE32+ console x86-64.
+           Windows dependencies inspected with objdump.
+
+NOT VALIDATED IN THIS ENVIRONMENT
+  Windows GUI rendering at runtime; Windows .exe execution;
+  cargo build / cargo test (no Rust compiler installed);
+  any performance or real-world physical fidelity claim.
+
+NO CRYPTOGRAPHIC SIGNATURE IS INCLUDED.

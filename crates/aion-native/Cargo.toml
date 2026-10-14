@@ -1,0 +1,8 @@
+[package]
+name = "aion-native"
+version = "0.4.0"
+edition = "2021"
+license = "MIT"
+build = "build.rs"
+
+[dependencies]
