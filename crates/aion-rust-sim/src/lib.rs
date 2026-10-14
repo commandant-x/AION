@@ -78,7 +78,7 @@ impl AionSim {
         for x in 0..6 { for y in 0..4 { for z in 0..3 {
             ids[x][y][z]=self.add_node(
                 V3::new((x as f64-2.5)*0.23,1.1+y as f64*0.23,(z as f64-1.)*0.23),
-                .070,mass,293.,self.material_mode);
+                0.070,mass,293.,self.material_mode);
         }}}
         for x in 0..6 { for y in 0..4 { for z in 0..3 {
             let a=ids[x][y][z];
@@ -86,19 +86,19 @@ impl AionSim {
             if y<3 {self.add_edge(a,ids[x][y+1][z],stiff,limit)}
             if z<2 {self.add_edge(a,ids[x][y][z+1],stiff,limit)}
             if x<5&&y<3 {
-                self.add_edge(a,ids[x+1][y+1][z],stiff*.56,limit*.7);
-                self.add_edge(ids[x+1][y][z],ids[x][y+1][z],stiff*.56,limit*.7);
+                self.add_edge(a,ids[x+1][y+1][z],stiff*0.56,limit*0.7);
+                self.add_edge(ids[x+1][y][z],ids[x][y+1][z],stiff*0.56,limit*0.7);
             }
             if x<5&&z<2 {
-                self.add_edge(a,ids[x+1][y][z+1],stiff*.56,limit*.7);
-                self.add_edge(ids[x+1][y][z],ids[x][y][z+1],stiff*.56,limit*.7);
+                self.add_edge(a,ids[x+1][y][z+1],stiff*0.56,limit*0.7);
+                self.add_edge(ids[x+1][y][z],ids[x][y][z+1],stiff*0.56,limit*0.7);
             }
             if y<3&&z<2 {
-                self.add_edge(a,ids[x][y+1][z+1],stiff*.56,limit*.7);
-                self.add_edge(ids[x][y+1][z],ids[x][y][z+1],stiff*.56,limit*.7);
+                self.add_edge(a,ids[x][y+1][z+1],stiff*0.56,limit*0.7);
+                self.add_edge(ids[x][y+1][z],ids[x][y][z+1],stiff*0.56,limit*0.7);
             }
         }}}
-        let hammer=self.add_node(V3::new(.12,3.90,.01),.23,11.,293.,3);
+        let hammer=self.add_node(V3::new(0.12,3.90,0.01),0.23,11.,293.,3);
         self.nodes[hammer].v=V3::new(0.,-4.,0.);
     }
     pub fn laboratory(mode: i32) -> Self { let mut world=Self::default();world.reset(mode);world }
@@ -112,8 +112,8 @@ impl AionSim {
         assert!(a!=b&&(self.edge_count as usize)<MAX_BONDS);
         let rest=(self.nodes[a].p-self.nodes[b].p).length();
         let (yield_strain,plastic_rate,damage_onset,damage_rate,dashpot)=match self.material_mode{
-            1=>(.055,8.,.10,.65,1.5), 2=>(.20,0.,.042,8.,.22),
-            _=>(.10,2.5,.065,2.5,.55)
+            1=>(0.055,8.,0.10,0.65,1.5), 2=>(0.20,0.,0.042,8.,0.22),
+            _=>(0.10,2.5,0.065,2.5,0.55)
         };
         self.edges[self.edge_count as usize]=Edge {a:a as i32,b:b as i32,alive:1,
             rest,k,limit,conductance:3.2,original_rest:rest,yield_strain,plastic_rate,
@@ -143,8 +143,8 @@ impl AionSim {
         }
     }
     pub fn step(&mut self, dt:f64){
-        if !dt.is_finite()||dt<=0.||dt>.1 {self.rejected_steps+=1;return}
-        let sub=((dt/.002+0.999999) as usize).max(1);
+        if !dt.is_finite()||dt<=0.||dt>0.1 {self.rejected_steps+=1;return}
+        let sub=((dt/0.002+0.999999) as usize).max(1);
         let h=dt/sub as f64;
         for _ in 0..sub {self.substep(h)}
     }
@@ -165,12 +165,12 @@ impl AionSim {
             self.max_strain=self.max_strain.max(strain);
             let mut changed=e;
             if changed.plastic_rate>0.&&strain>changed.yield_strain{
-                let before=.5*changed.k*(1.-changed.damage)*ext*ext;
+                let before=0.5*changed.k*(1.-changed.damage)*ext*ext;
                 let target=dist-ext.signum()*changed.yield_strain*changed.rest;
                 let alpha=(changed.plastic_rate*dt).min(1.);
                 changed.rest+=(target-changed.rest)*alpha;
                 ext=dist-changed.rest;
-                let after=.5*changed.k*(1.-changed.damage)*ext*ext;
+                let after=0.5*changed.k*(1.-changed.damage)*ext*ext;
                 if before>after {
                     let heat=before-after;self.add_heat(a,b,heat);self.plastic_heat+=heat;
                 }
@@ -181,16 +181,16 @@ impl AionSim {
                 let previous=changed.damage;
                 changed.damage=(changed.damage+changed.damage_rate*(strain-changed.damage_onset)*dt).min(1.);
                 if changed.damage>previous{
-                    let heat=.5*changed.k*(changed.damage-previous)*ext*ext;
+                    let heat=0.5*changed.k*(changed.damage-previous)*ext*ext;
                     self.add_heat(a,b,heat);self.damage_heat+=heat;
                 }
             }
             self.max_damage=self.max_damage.max(changed.damage);
             let spring_force=changed.k*(1.-changed.damage)*ext;
-            if spring_force.abs()>changed.limit||changed.damage>=.999 {
-                if changed.damage>=.999{self.fatigue_fractures+=1}
+            if spring_force.abs()>changed.limit||changed.damage>=0.999 {
+                if changed.damage>=0.999{self.fatigue_fractures+=1}
                 changed.alive=0;self.fractures+=1;
-                let heat=.5*changed.k*(1.-changed.damage)*ext*ext;
+                let heat=0.5*changed.k*(1.-changed.damage)*ext*ext;
                 self.add_heat(a,b,heat);self.damage_heat+=heat;
                 self.edges[index]=changed;
                 continue;
@@ -238,13 +238,13 @@ impl AionSim {
             self.nodes[i].p-=fix*ia;self.nodes[j].p+=fix*ib;
             let rel=(self.nodes[j].v-self.nodes[i].v).dot(dir);
             if rel<0.{
-                let before=.5*self.nodes[i].m*self.nodes[i].v.dot(self.nodes[i].v)
-                    +.5*self.nodes[j].m*self.nodes[j].v.dot(self.nodes[j].v);
-                let impulse=-(1.+.24)*rel/(ia+ib);
+                let before=0.5*self.nodes[i].m*self.nodes[i].v.dot(self.nodes[i].v)
+                    +0.5*self.nodes[j].m*self.nodes[j].v.dot(self.nodes[j].v);
+                let impulse=-(1.+0.24)*rel/(ia+ib);
                 self.nodes[i].v-=dir*(impulse*ia);
                 self.nodes[j].v+=dir*(impulse*ib);
-                let after=.5*self.nodes[i].m*self.nodes[i].v.dot(self.nodes[i].v)
-                    +.5*self.nodes[j].m*self.nodes[j].v.dot(self.nodes[j].v);
+                let after=0.5*self.nodes[i].m*self.nodes[i].v.dot(self.nodes[i].v)
+                    +0.5*self.nodes[j].m*self.nodes[j].v.dot(self.nodes[j].v);
                 self.add_heat(i,j,before-after);
                 self.max_contact_impulse=self.max_contact_impulse.max(impulse);
                 self.contacts+=1;
@@ -255,9 +255,9 @@ impl AionSim {
                 if p.p.y>=p.r{continue}
                 p.p.y=p.r;
                 if p.v.y<0.{
-                    let before=.5*p.m*p.v.dot(p.v);
-                    p.v.y=-p.v.y*.2;p.v.x*=.91;p.v.z*=.91;
-                    let after=.5*p.m*p.v.dot(p.v);
+                    let before=0.5*p.m*p.v.dot(p.v);
+                    p.v.y=-p.v.y*0.2;p.v.x*=0.91;p.v.z*=0.91;
+                    let after=0.5*p.m*p.v.dot(p.v);
                     p.t+=(before-after)/p.cv;
                 }
             }
@@ -267,19 +267,19 @@ impl AionSim {
     pub fn impact(&mut self){if self.node_count>0{self.nodes[self.node_count as usize-1].v.y-=7.}}
     pub fn pull(&mut self){for p in self.nodes.iter_mut().take(self.node_count as usize){
         if p.kind==3{continue}
-        if p.p.x<-.35{p.v.x-=1.8}
-        else if p.p.x>.35{p.v.x+=1.8}
+        if p.p.x< -0.35{p.v.x-=1.8}
+        else if p.p.x>0.35{p.v.x+=1.8}
     }}
-    pub fn heat(&mut self){for p in self.nodes.iter_mut().take((self.node_count-1).max(0) as usize){if p.p.x<-.25{p.t+=25.}}}
+    pub fn heat(&mut self){for p in self.nodes.iter_mut().take((self.node_count-1).max(0) as usize){if p.p.x< -0.25{p.t+=25.}}}
     pub fn alive_bonds(&self)->i32{self.edges.iter().take(self.edge_count as usize).filter(|e|e.alive!=0).count() as i32}
     pub fn mass(&self)->f64{self.nodes.iter().take(self.node_count as usize).map(|n|n.m).sum()}
     pub fn thermal_energy(&self)->f64{self.nodes.iter().take(self.node_count as usize).map(|n|n.t*n.cv).sum()}
     pub fn mechanical_energy(&self)->f64{
         let mut result=0.;
-        for n in self.nodes.iter().take(self.node_count as usize){result+=.5*n.m*n.v.dot(n.v)-n.m*self.gravity*n.p.y}
+        for n in self.nodes.iter().take(self.node_count as usize){result+=0.5*n.m*n.v.dot(n.v)-n.m*self.gravity*n.p.y}
         for e in self.edges.iter().take(self.edge_count as usize).filter(|e|e.alive!=0){
             let ext=(self.nodes[e.a as usize].p-self.nodes[e.b as usize].p).length()-e.rest;
-            result+=.5*e.k*ext*ext;
+            result+=0.5*e.k*ext*ext;
         }
         result
     }
@@ -351,11 +351,11 @@ impl AionSim {
         assert!(s.mass()>0.);assert_eq!(s.nodes[72].kind,3);
     }}
     #[test] fn is_reproducible(){let mut a=sim(0);let mut b=sim(0);
-        for _ in 0..2000{a.step(.003);b.step(.003)}
+        for _ in 0..2000{a.step(0.003);b.step(0.003)}
         assert_eq!(a.checksum(),b.checksum());assert!(a.fractures>0);
     }
     #[test] fn mass_and_nonnegative_temperature(){let mut a=sim(1);let mass=a.mass();
-        for _ in 0..3000 {a.step(.003)}
+        for _ in 0..3000 {a.step(0.003)}
         assert_eq!(mass,a.mass());
         for p in a.nodes.iter().take(a.node_count as usize){
             assert!(p.p.x.is_finite()&&p.p.y.is_finite()&&p.p.z.is_finite());
@@ -365,10 +365,10 @@ impl AionSim {
     }
     #[test] fn isolated_collision_preserves_momentum(){let mut s=sim(0);
         s.node_count=2;s.edge_count=0;s.floor_enabled=0;s.gravity=0.;
-        for i in 0..2{s.nodes[i].p=V3::new(if i==0{-.19}else{.19},2.,0.);
-            s.nodes[i].m=1.;s.nodes[i].r=.2;s.nodes[i].cv=500.;}
+        for i in 0..2{s.nodes[i].p=V3::new(if i==0{-0.19}else{0.19},2.,0.);
+            s.nodes[i].m=1.;s.nodes[i].r=0.2;s.nodes[i].cv=500.;}
         s.nodes[0].v=V3::new(1.,0.,0.);s.nodes[1].v=V3::new(-1.,0.,0.);
-        s.step(.003);
+        s.step(0.003);
         assert!(s.contacts>0);assert!((s.nodes[0].v.x+s.nodes[1].v.x).abs()<1e-12);
     }
     #[test] fn thermal_exchange_is_conservative(){let mut s=sim(0);
@@ -378,12 +378,12 @@ impl AionSim {
         s.edges[0].a=0;s.edges[0].b=1;s.edges[0].alive=1;
         s.edges[0].k=0.;s.edges[0].dashpot=0.;s.edges[0].damage_rate=0.;
         s.edges[0].plastic_rate=0.;s.edges[0].conductance=50.;
-        let before=s.thermal_energy();s.step(.002);
+        let before=s.thermal_energy();s.step(0.002);
         assert!((before-s.thermal_energy()).abs()<1e-7);
         assert!(s.nodes[0].t<350.&&s.nodes[1].t>250.);
     }
     #[test] fn rejects_invalid_steps(){let mut s=sim(0);let checksum=s.checksum();
-        for dt in [f64::NAN,f64::INFINITY,0.,-.1,.101]{s.step(dt)}
+        for dt in [f64::NAN,f64::INFINITY,0.,-0.1,0.101]{s.step(dt)}
         assert_eq!(s.rejected_steps,5);assert_eq!(checksum,s.checksum());
     }
     #[test] fn rust_abi_matches_c_reference_layout(){
@@ -397,28 +397,28 @@ impl AionSim {
         let mut s=sim(0);s.node_count=2;s.edge_count=1;s.gravity=0.;s.floor_enabled=0;
         s.nodes[0].p=V3::new(0.,1.,0.);
         s.nodes[1].p=V3::new(1.25,1.,0.);
-        for n in s.nodes.iter_mut().take(2){n.v=V3::default();n.r=.05;n.m=1.;n.cv=500.;n.t=300.;}
+        for n in s.nodes.iter_mut().take(2){n.v=V3::default();n.r=0.05;n.m=1.;n.cv=500.;n.t=300.;}
         s.edges[0]=Edge{a:0,b:1,alive:1,rest:1.,k:20.,limit:5000.,
-            conductance:0.,original_rest:1.,yield_strain:.05,plastic_rate:30.,
-            damage:0.,damage_onset:.30,damage_rate:0.,dashpot:0.};
-        let before=s.total_energy();s.step(.002);
+            conductance:0.,original_rest:1.,yield_strain:0.05,plastic_rate:30.,
+            damage:0.,damage_onset:0.30,damage_rate:0.,dashpot:0.};
+        let before=s.total_energy();s.step(0.002);
         assert!(s.edges[0].rest>1.);
         assert!(s.plastic_heat>0.);
-        assert!((s.total_energy()-before).abs()<.006);
-        let rest=s.edges[0].rest;s.edges[0].plastic_rate=0.;s.step(.002);
+        assert!((s.total_energy()-before).abs()<0.006);
+        let rest=s.edges[0].rest;s.edges[0].plastic_rate=0.;s.step(0.002);
         assert_eq!(s.edges[0].rest,rest);
     }
     #[test] fn cumulative_damage_does_not_self_heal(){
         let mut s=sim(0);s.node_count=2;s.edge_count=1;s.gravity=0.;s.floor_enabled=0;
         s.nodes[0].p=V3::new(0.,2.,0.);
         s.nodes[1].p=V3::new(1.25,2.,0.);
-        for n in s.nodes.iter_mut().take(2){n.v=V3::default();n.m=1.;n.r=.05;n.cv=500.;n.t=300.;}
+        for n in s.nodes.iter_mut().take(2){n.v=V3::default();n.m=1.;n.r=0.05;n.cv=500.;n.t=300.;}
         s.edges[0]=Edge{a:0,b:1,alive:1,rest:1.,k:20.,limit:5000.,
             conductance:0.,original_rest:1.,yield_strain:1.,plastic_rate:0.,
-            damage:0.,damage_onset:.05,damage_rate:10.,dashpot:0.};
-        s.step(.002);let damaged=s.edges[0].damage;assert!(damaged>0.);
+            damage:0.,damage_onset:0.05,damage_rate:10.,dashpot:0.};
+        s.step(0.002);let damaged=s.edges[0].damage;assert!(damaged>0.);
         s.nodes[1].p=V3::new(1.,2.,0.);s.nodes[0].v=V3::default();s.nodes[1].v=V3::default();
-        s.step(.002);assert_eq!(s.edges[0].damage,damaged);
+        s.step(0.002);assert_eq!(s.edges[0].damage,damaged);
     }
     #[test] fn heating_and_pull_have_effect(){let mut s=sim(0);
         let energy=s.total_energy();s.heat();assert!(s.total_energy()>energy);

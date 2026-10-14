@@ -38,7 +38,7 @@ impl WaveGrid {
 #[cfg(test)] mod tests {
     use super::*;
     #[test]#[should_panic(expected="unstable CFL ratio")]
-    fn rejects_unstable_timestep(){let _=WaveGrid::new(32,32,1.,.5,2.);}
-    #[test]fn disturbance_propagates(){let mut w=WaveGrid::new(32,32,1.,.1,2.);w.pulse(16,16,1.);for _ in 0..10{w.step();}assert!(w.value(17,16).abs()>1e-6);}
-    #[test]fn stable_over_long_run(){let mut w=WaveGrid::new(32,32,1.,.1,2.);w.pulse(16,16,1.);for _ in 0..1000{w.step();assert!(w.max_amplitude().is_finite());assert!(w.max_amplitude()<5.);}}
+    fn rejects_unstable_timestep(){let _=WaveGrid::new(32,32,1.,0.5,2.);}
+    #[test]fn disturbance_propagates(){let mut w=WaveGrid::new(32,32,1.,0.1,2.);w.pulse(16,16,1.);for _ in 0..10{w.step();}assert!(w.value(17,16).abs()>1e-6);}
+    #[test]fn stable_over_long_run(){let mut w=WaveGrid::new(32,32,1.,0.1,2.);w.pulse(16,16,1.);for _ in 0..1000{w.step();assert!(w.max_amplitude().is_finite());assert!(w.max_amplitude()<5.);}}
 }

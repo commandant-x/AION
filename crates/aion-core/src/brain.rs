@@ -41,7 +41,7 @@ impl<const N:usize,const A:usize> Brain<N,A> {
 }
 #[cfg(test)]mod tests {
     use super::*;
-    #[test]fn uninformed_initial_policy(){let mut rng=Rng::new(2);let b=Brain::<3,4>::blank(&mut rng,.1);let p=b.probabilities([0.,0.,0.]);for x in p {assert!((x-0.25).abs()<0.001);}}
-    #[test]fn reinforcement_shifts_preference(){let mut rng=Rng::new(2);let mut b=Brain::<2,3>::blank(&mut rng,.05);let o=[1.,0.];let before=b.probabilities(o)[2];for _ in 0..50{b.update(o,2,1.,0.);}assert!(b.probabilities(o)[2]>before+0.2);}
-    #[test]fn brain_repeatability(){let mut a=Rng::new(2026);let mut b=Rng::new(2026);let x=Brain::<5,8>::blank(&mut a,.01);let y=Brain::<5,8>::blank(&mut b,.01);assert_eq!(x.weights,y.weights);}
+    #[test]fn uninformed_initial_policy(){let mut rng=Rng::new(2);let b=Brain::<3,4>::blank(&mut rng,0.1);let p=b.probabilities([0.,0.,0.]);for x in p {assert!((x-0.25).abs()<0.001);}}
+    #[test]fn reinforcement_shifts_preference(){let mut rng=Rng::new(2);let mut b=Brain::<2,3>::blank(&mut rng,0.05);let o=[1.,0.];let before=b.probabilities(o)[2];for _ in 0..50{b.update(o,2,1.,0.);}assert!(b.probabilities(o)[2]>before+0.2);}
+    #[test]fn brain_repeatability(){let mut a=Rng::new(2026);let mut b=Rng::new(2026);let x=Brain::<5,8>::blank(&mut a,0.01);let y=Brain::<5,8>::blank(&mut b,0.01);assert_eq!(x.weights,y.weights);}
 }
