@@ -1,3 +1,17 @@
+# PRIMORDIA 0.13 — Première interaction avec la croûte terrestre
+
+Le moteur Rust GPU permet maintenant de **creuser et remblayer le relief**. Il distingue huit types de matières (terre, sable, argile, gravier, tourbe, calcaire, granite et basalte), avec des strates liées aux champs géologiques, des densités et des duretés synthétiques. Les changements restent visibles lors du streaming du terrain. Un inventaire comptabilise les matériaux extraits et empêche la création de matière lors du dépôt.
+
+**Commandes** : `Q` creuser 2 m³ (une couche de 0,5 m sur une maille de 2 m × 2 m) ; `1` à `8` choisir une matière ; `E` déposer une unité disponible ; `P` sauvegarder auprès du programme ; `L` charger ; `R` revenir au point de départ. Pour la caméra : clic gauche, WASD, Espace (saut), Shift (sprint), F (vol), Échap.
+
+Le détail de la matière sélectionnée, le volume restant et le bilan des cellules éditées sont visibles dans le titre de la fenêtre.
+
+**Limites** : il s'agit encore d'une **surface à couches stratifiées**, et non d'un monde volumique 3D avec grottes ou surplombs. L'énergie nécessaire pour casser la roche, l'érosion et les processus tectoniques ne sont pas encore calculés. La simulation géologique complète reste un objectif ouvert.
+
+**Validation** : [GitHub Actions Windows/Linux](https://github.com/commandant-x/AION/actions/workflows/aion-gpu-explorer.yml), avec tests de conservation et tests de fenêtre.
+
+---
+
 # PRIMORDIA 0.12 — saut, géologie structurée et océan visible
 
 **Nouveau :** saut (ESPACE), gravité et collisions kinematiques avec le sol ; haute résolution adaptative 2/4/8 m et génération asynchrone pour préserver la réactivité ; surface océanique translucide à zéro mètre et fond marin ; soulèvements, dureté de roche et vallées incisées par champs géologiques procéduraux.
