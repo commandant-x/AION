@@ -2,7 +2,7 @@
 //! Sealed boundaries; uniform rain is a measured external source.
 //! Manning diffusive-wave runoff and one-way infiltration are approximations,
 //! not a momentum solver or a calibrated catchment model.
-use crate::hydrothermal::HydroThermal;
+use aion_world::HydroThermal;
 mod runoff;
 mod infiltration;
 #[cfg(test)] mod tests;

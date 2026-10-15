@@ -1,0 +1,9 @@
+[package]
+name = "aion-surface"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Conservative experimental overland runoff coupled to AION hydrothermal patches"
+
+[dependencies]
+aion-world = { path = "../aion-world" }
