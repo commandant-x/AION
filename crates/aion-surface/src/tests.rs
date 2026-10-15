@@ -7,3 +7,4 @@ mod convergence;
 mod coupling;
 mod analytical;
 mod robustness;
+mod hydrostatic;
