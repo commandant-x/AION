@@ -5,3 +5,4 @@ fn grid(bed:Vec<f64>,width:usize,n:f64)->SurfaceWater{
 mod mass;
 mod convergence;
 mod coupling;
+mod analytical;
