@@ -5,6 +5,8 @@
 use aion_world::HydroThermal;
 mod runoff;
 mod infiltration;
+mod coupled;
+pub use coupled::{CoupledCatchment,CoupledReport};
 #[cfg(test)] mod tests;
 
 #[derive(Clone,Copy,Debug)]
