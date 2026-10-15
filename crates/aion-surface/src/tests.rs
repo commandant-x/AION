@@ -8,3 +8,4 @@ mod coupling;
 mod analytical;
 mod robustness;
 mod hydrostatic;
+mod coupled;
