@@ -24,6 +24,9 @@ pub struct CoupledCatchment {
     initial_total_m3: f64,
     initial_surface_supply_m3: f64,
     initial_rain_m3: f64,
+    initial_surface_infiltrated_m3: f64,
+    initial_hydro_injected_m3: f64,
+    initial_hydro_withdrawn_m3: f64,
 }
 impl CoupledCatchment {
     pub fn new(surface: SurfaceWater, hydro: HydroThermal) -> Result<Self,String> {
@@ -35,7 +38,11 @@ impl CoupledCatchment {
         let initial_total_m3=surface.water_m3()+hydro.water_m3();
         let initial_surface_supply_m3=surface.report().supplied_m3;
         let initial_rain_m3=surface.report().rain_m3;
-        Ok(Self{surface,hydro,initial_total_m3,initial_surface_supply_m3,initial_rain_m3})
+        let initial_surface_infiltrated_m3=surface.report().infiltrated_m3;
+        let initial_hydro_injected_m3=hydro.report().injected_water_m3;
+        let initial_hydro_withdrawn_m3=hydro.report().withdrawn_water_m3;
+        Ok(Self{surface,hydro,initial_total_m3,initial_surface_supply_m3,initial_rain_m3,
+            initial_surface_infiltrated_m3,initial_hydro_injected_m3,initial_hydro_withdrawn_m3})
     }
     pub fn report(&self)->CoupledReport {
         let s=self.surface.report();
@@ -46,7 +53,9 @@ impl CoupledCatchment {
             -self.initial_total_m3
             -(s.supplied_m3-self.initial_surface_supply_m3)
             -(s.rain_m3-self.initial_rain_m3)
-            +h.withdrawn_water_m3;
+            +(h.withdrawn_water_m3-self.initial_hydro_withdrawn_m3)
+            -(h.injected_water_m3-self.initial_hydro_injected_m3)
+            +(s.infiltrated_m3-self.initial_surface_infiltrated_m3);
         CoupledReport{
             time_s:s.time_s,surface_m3:s.surface_water_m3,
             subsurface_m3:h.total_water_m3,rain_m3:s.rain_m3,
@@ -57,6 +66,26 @@ impl CoupledCatchment {
     }
     /// Sequential operator splitting: rain -> runoff -> infiltration -> Darcy/Fourier.
     /// A time step is not a converged simultaneous multiphysics solution.
+    /// Integrate a long interval using bounded substeps. Transactional across
+    /// the entire requested interval; no partial advance on failure.
+    /// Rain rate and temperature are held constant over the interval.
+    pub fn advance(&mut self,duration_s:f64,max_step_s:f64,
+                   rain_m_s:f64,rain_temperature_k:f64)->Result<CoupledReport,String>{
+        if !duration_s.is_finite()||duration_s<=0.0||!max_step_s.is_finite()
+            ||max_step_s<=0.0||max_step_s>60.0 {
+            return Err("Invalid integration interval".into());
+        }
+        let count=(duration_s/max_step_s).ceil();
+        if !count.is_finite()||count>1_000_000.0 {
+            return Err("Integration exceeds substep budget".into());
+        }
+        let count=count as usize;
+        let dt=duration_s/count as f64;
+        let mut next=self.clone();
+        for _ in 0..count {next.step(dt,rain_m_s,rain_temperature_k)?;}
+        *self=next;
+        Ok(self.report())
+    }
     pub fn step(&mut self,dt_s:f64,rain_m_s:f64,rain_temperature_k:f64)->Result<CoupledReport,String>{
         if !dt_s.is_finite()||dt_s<=0.0||dt_s>60.0
             ||!rain_m_s.is_finite()||rain_m_s<0.0
