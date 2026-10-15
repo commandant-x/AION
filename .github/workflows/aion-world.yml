@@ -4,11 +4,15 @@ on:
     paths:
       - 'Cargo.toml'
       - 'crates/aion-world/**'
+      - 'crates/aion-surface/**'
+      - 'tests/validate_surface_017.py'
       - '.github/workflows/aion-world.yml'
   pull_request:
     paths:
       - 'Cargo.toml'
       - 'crates/aion-world/**'
+      - 'crates/aion-surface/**'
+      - 'tests/validate_surface_017.py'
       - '.github/workflows/aion-world.yml'
   workflow_dispatch:
 permissions:
@@ -23,7 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test -p aion-world --all-targets
+      - run: cargo test -p aion-world -p aion-surface --all-targets
       - run: cargo build --release -p aion-world --bin aion-world-export
       - name: Export deterministic OBJ mesh
         shell: bash
@@ -35,6 +39,29 @@ jobs:
           fi
           test -s terrain.obj
           grep -q '^f ' terrain.obj
+      - name: Build and validate surface/groundwater experiment
+        shell: bash
+        run: |
+          cargo build --release -p aion-surface --bin aion-surface-benchmark
+          if [ "$RUNNER_OS" = Windows ]; then
+            ./target/release/aion-surface-benchmark.exe surface-017.csv
+          else
+            ./target/release/aion-surface-benchmark surface-017.csv
+          fi
+          python tests/validate_surface_017.py surface-017.csv | tee surface-validation.txt
+      - name: Upload Windows surface model, executable and validation
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: AION-SURFACE-EXPERIMENT-WIN64
+          path: |
+            target/release/aion-surface-benchmark.exe
+            surface-017.csv
+            surface-validation.txt
+            crates/aion-surface/**
+            tests/validate_surface_017.py
+            docs/SURFACE_MODEL.md
+          if-no-files-found: error
       - name: Upload Windows exporter and mesh
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
